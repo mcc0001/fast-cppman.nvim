@@ -317,6 +317,17 @@ local function create_cppman_buffer(selection, selection_number)
 		end
 	end, opts)
 
+	vim.keymap.set("n", "<C-]>", function()
+		local word = vim.fn.expand("<cword>")
+		if word and word ~= "" then
+			if state.current_page then
+				table.insert(state.stack, state.current_page)
+			end
+			state.current_page = word
+			create_cppman_buffer(word)
+		end
+	end, opts)
+
 	vim.keymap.set("n", "<C-o>", function()
 		if #state.stack > 0 then
 			local prev = table.remove(state.stack)
