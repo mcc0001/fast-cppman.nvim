@@ -260,7 +260,6 @@ local function create_cppman_buffer(selection, selection_number)
 	vim.bo[buf].buftype = "nofile"
 	vim.bo[buf].bufhidden = "hide"
 	vim.bo[buf].swapfile = false
-	vim.bo[buf].filetype = "man"
 	vim.bo[buf].modifiable = true
 
 	local win = vim.api.nvim_open_win(buf, true, {
@@ -319,6 +318,9 @@ local function create_cppman_buffer(selection, selection_number)
 			vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
 			vim.bo[buf].modifiable = false
 			vim.bo[buf].readonly = true
+
+			-- Set filetype and syntax after content is loaded
+			vim.bo[buf].filetype = "cppman"
 		end
 	end)
 
