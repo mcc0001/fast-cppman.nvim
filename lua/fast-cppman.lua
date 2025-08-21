@@ -28,19 +28,26 @@ local state = {
 	async_jobs = {},
 	async_queue = {},
 	buffer_counter = 0,
+	initial_cursor = {
+		top = 0,
+		left = 0,
+		row = 0,
+		col = 0,
+	},
 }
 
 -- Calculate optimal window size and position
 local function calculate_window_size_and_position(content_lines, max_width, max_height, min_height)
 	local ui = vim.api.nvim_list_uis()[1] or { width = vim.o.columns, height = vim.o.lines }
-	local win = vim.api.nvim_get_current_win()
-	local top, left = unpack(vim.fn.win_screenpos(win))
-	local cur = vim.api.nvim_win_get_cursor(win)
+	-- Use stored initial cursor position
+	local top = state.initial_cursor.top
+	local left = state.initial_cursor.left
+	local cur_row = state.initial_cursor.row
+	local cur_col = state.initial_cursor.col
 
 	-- Convert to 0-based editor grid coordinates
-	local abs_row = (top - 1) + (cur[1] - 1)
-	local abs_col = (left - 1) + cur[2]
-
+	local abs_row = (top - 1) + (cur_row - 1)
+	local abs_col = (left - 1) + cur_col
 	-- Calculate content height
 	local content_height = #content_lines
 	local border_height = 2 -- top and bottom border
@@ -362,10 +369,11 @@ end
 
 -- Create a scrollable buffer with cppman content
 local function create_cppman_buffer(selection, selection_number)
-	local max_width = math.min(M.config.max_width, vim.o.columns - 10)
-	local max_height = math.min(M.config.max_height, vim.o.lines - 10)
+	local max_width = math.min(M.config.max_width, vim.o.columns)
+	local max_height = math.min(M.config.max_height, vim.o.lines)
 	local min_height = M.config.min_height
-	local optimal_columns = calculate_optimal_columns(max_width)
+	-- local optimal_columns = calculate_optimal_columns(max_width)
+	local optimal_columns = 80
 
 	local buf = vim.api.nvim_create_buf(false, true)
 	state.current_buf = buf
@@ -379,27 +387,20 @@ local function create_cppman_buffer(selection, selection_number)
 	vim.bo[buf].swapfile = false
 	vim.bo[buf].modifiable = true
 
-	-- Create initial placeholder content for window sizing
-	local placeholder_lines = { "Loading cppman content..." }
-	for i = 2, min_height do
-		table.insert(placeholder_lines, "")
-	end
+	-- Create temporary window with minimal size to get proper positioning
+	local temp_geometry = calculate_window_size_and_position({ "Loading..." }, max_width, max_height, min_height)
 
-	-- Calculate initial window size and position
-	local initial_geometry = calculate_window_size_and_position(placeholder_lines, max_width, max_height, min_height)
-
-	-- Create window with initial size and position
 	local win_opts = {
 		relative = "editor",
-		width = initial_geometry.width,
-		height = initial_geometry.height,
+		width = temp_geometry.width,
+		height = temp_geometry.height,
 		style = "minimal",
 		border = "double",
 		title = "cppman: " .. selection,
 		title_pos = "center",
 		zindex = 200,
-		row = initial_geometry.row,
-		col = initial_geometry.col,
+		row = temp_geometry.row,
+		col = temp_geometry.col,
 	}
 
 	local win = vim.api.nvim_open_win(buf, true, win_opts)
@@ -751,6 +752,17 @@ end
 
 M.open_cppman_for = function(word_to_search)
 	cleanup()
+
+	-- Store initial cursor position before creating any windows
+	local win = vim.api.nvim_get_current_win()
+	local top, left = unpack(vim.fn.win_screenpos(win))
+	local cur = vim.api.nvim_win_get_cursor(win)
+	state.initial_cursor = {
+		top = top,
+		left = left,
+		row = cur[1],
+		col = cur[2],
+	}
 
 	-- Parse options synchronously
 	local options = parse_cppman_options(word_to_search)
