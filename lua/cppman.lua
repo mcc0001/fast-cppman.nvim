@@ -382,19 +382,37 @@ local function create_cppman_buffer(selection, selection_number)
 			state.current_page = prev.page
 			state.current_selection_number = prev.selection_number
 			create_cppman_buffer(prev.page, prev.selection_number)
+		else
+			vim.notify("No previous page to go back to", vim.log.levels.INFO)
 		end
 	end, opts)
 
-	-- Load content asynchronously
+	-- Load content asynchronously with cache validation
 	execute_cppman(selection, selection_number, optimal_columns, function(lines)
-		if vim.api.nvim_buf_is_valid(buf) then
-			vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
-			vim.bo[buf].modifiable = false
-			vim.bo[buf].readonly = true
-
-			-- Set filetype and syntax after content is loaded
-			vim.bo[buf].filetype = "cppman"
+		if not vim.api.nvim_buf_is_valid(buf) then
+			return
 		end
+
+		-- Check if we got valid content
+		if #lines == 0 or (lines[1] and lines[1]:find("No output from cppman")) then
+			-- If no content, try to get from cache without selection number
+			if selection_number then
+				local fallback_cache_key = generate_cache_key(selection, nil, optimal_columns)
+				if state.cache[fallback_cache_key] then
+					lines = state.cache[fallback_cache_key]
+				end
+			end
+
+			-- If still no content, show error
+			if #lines == 0 then
+				lines = { "No content available", "Press C-o to go back" }
+			end
+		end
+
+		vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+		vim.bo[buf].modifiable = false
+		vim.bo[buf].readonly = true
+		vim.bo[buf].filetype = "cppman"
 	end)
 
 	return win, buf
@@ -460,7 +478,7 @@ local function show_selection_window(word_to_search, options)
 			vim.api.nvim_win_close(win, true)
 			safe_close(buf)
 			create_cppman_buffer(word_to_search, selection_num)
-			state.current_page = options[selection_num].value
+			state.current_page = word_to_search
 			state.current_selection_number = selection_num
 		else
 			vim.notify("Invalid selection", vim.log.levels.ERROR)
