@@ -27,14 +27,14 @@ return {
     {
       "<leader>cp",
       function()
-        require("cppman").open_cppman_for(vim.fn.expand("<cword>"))
+        require("fast-cppman").open_cppman_for(vim.fn.expand("<cword>"))
       end,
       desc = "Search current function from cppman",
     },
     {
       "<leader>cP",
       function()
-        require("cppman").input()
+        require("fast-cppman").input()
       end,
       desc = "open cppman search box",
     },
@@ -78,7 +78,7 @@ You can also call the functions directly:
  end)
  ```
  ## Navigation Inside cppman Buffer
- Once the cppman buffer is open, you can use the following keybindings:
+ Once the fast-cppman buffer is open, you can use the following keybindings:
 - `K` or `<C-]>`: Follow the word under the cursor (open its documentation).
 - `<C-o>`: Go back to the previous page.
 - `<C-i>`: Go forward to the next page.

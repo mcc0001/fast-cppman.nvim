@@ -454,7 +454,7 @@ local function create_cppman_buffer(selection, selection_number)
 		vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
 		vim.bo[buf].modifiable = false
 		vim.bo[buf].readonly = true
-		vim.bo[buf].filetype = "cppman"
+		vim.bo[buf].filetype = "c"
 	end)
 
 	return win, buf
