@@ -498,7 +498,14 @@ local function show_selection_window(word_to_search, options)
 			local prev = table.remove(state.stack)
 			state.current_page = prev.page
 			state.current_selection_number = prev.selection_number
-			create_cppman_buffer(prev.page, prev.selection_number)
+
+			if prev.selection_number then
+				-- Restore exact man page
+				create_cppman_buffer(prev.page, prev.selection_number)
+			else
+				-- Re-run option parsing if no selection number
+				M.open_cppman_for(prev.page)
+			end
 		else
 			vim.notify("No previous page to go back to", vim.log.levels.INFO)
 		end
