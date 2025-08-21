@@ -10,10 +10,12 @@ M.config = {
 	max_prefetch_options = 10,
 	max_width = 100,
 	max_height = 30,
+	min_height = 5,
 	input_width = 20,
-	enable_async = true, -- Enable async operations
-	max_async_jobs = 5, -- Maximum concurrent async jobs
-	history_mode = "manpage", -- "manpage" | "unified"
+	enable_async = true,
+	max_async_jobs = 5,
+	history_mode = "manpage",
+	position = "cursor",
 }
 
 local state = {
@@ -23,10 +25,79 @@ local state = {
 	current_buf = nil,
 	current_win = nil,
 	cache = {},
-	async_jobs = {}, -- Track active async jobs
-	async_queue = {}, -- Queue for async jobs when max limit reached
-	buffer_counter = 0, -- Counter to make buffer names unique
+	async_jobs = {},
+	async_queue = {},
+	buffer_counter = 0,
 }
+
+-- Calculate optimal window size and position
+local function calculate_window_size_and_position(content_lines, max_width, max_height, min_height)
+	local ui = vim.api.nvim_list_uis()[1] or { width = vim.o.columns, height = vim.o.lines }
+	local win = vim.api.nvim_get_current_win()
+	local top, left = unpack(vim.fn.win_screenpos(win))
+	local cur = vim.api.nvim_win_get_cursor(win)
+
+	-- Convert to 0-based editor grid coordinates
+	local abs_row = (top - 1) + (cur[1] - 1)
+	local abs_col = (left - 1) + cur[2]
+
+	-- Calculate content height
+	local content_height = #content_lines
+	local border_height = 2 -- top and bottom border
+	local inner_height = math.min(max_height, math.max(min_height, content_height))
+	local total_height = inner_height + border_height
+
+	-- Calculate available space below and above cursor
+	local space_below = ui.height - (abs_row + 1)
+	local space_above = abs_row
+
+	-- Determine position (below or above cursor)
+	local position_below = space_below >= total_height or space_below >= space_above
+	local row
+
+	if position_below then
+		row = abs_row + 1
+		-- Adjust height if not enough space below
+		if space_below < total_height then
+			inner_height = math.min(max_height, math.max(min_height, space_below - border_height))
+		end
+	else
+		row = abs_row - total_height
+		-- Adjust height if not enough space above
+		if space_above < total_height then
+			inner_height = math.min(max_height, math.max(min_height, space_above - border_height))
+			row = abs_row - (inner_height + border_height)
+		end
+		-- Ensure row doesn't go off-screen
+		row = math.max(0, row)
+	end
+
+	-- Calculate width
+	local max_line_length = 0
+	for _, line in ipairs(content_lines) do
+		max_line_length = math.max(max_line_length, #line)
+	end
+
+	local inner_width = math.min(max_width, math.max(20, max_line_length))
+	local border_width = 2 -- left and right border
+	local total_width = inner_width + border_width
+
+	-- Calculate horizontal position
+	local col = abs_col - math.floor(total_width / 2)
+	if col + total_width > ui.width then
+		col = ui.width - total_width
+	end
+	col = math.max(0, col)
+
+	return {
+		row = row,
+		col = col,
+		width = inner_width,
+		height = inner_height,
+		total_width = total_width,
+		total_height = total_height,
+	}
+end
 
 -- Utility functions
 local function safe_close(bufnr)
@@ -45,7 +116,6 @@ local function cleanup()
 	safe_close(state.current_buf)
 	safe_win_close(state.current_win)
 
-	-- Clean up any active async jobs
 	for _, job in ipairs(state.async_jobs) do
 		if job and job.handle and not job.handle:is_closing() then
 			job.handle:close()
@@ -294,6 +364,7 @@ end
 local function create_cppman_buffer(selection, selection_number)
 	local max_width = math.min(M.config.max_width, vim.o.columns - 10)
 	local max_height = math.min(M.config.max_height, vim.o.lines - 10)
+	local min_height = M.config.min_height
 	local optimal_columns = calculate_optimal_columns(max_width)
 
 	local buf = vim.api.nvim_create_buf(false, true)
@@ -308,18 +379,30 @@ local function create_cppman_buffer(selection, selection_number)
 	vim.bo[buf].swapfile = false
 	vim.bo[buf].modifiable = true
 
-	local win = vim.api.nvim_open_win(buf, true, {
+	-- Create initial placeholder content for window sizing
+	local placeholder_lines = { "Loading cppman content..." }
+	for i = 2, min_height do
+		table.insert(placeholder_lines, "")
+	end
+
+	-- Calculate initial window size and position
+	local initial_geometry = calculate_window_size_and_position(placeholder_lines, max_width, max_height, min_height)
+
+	-- Create window with initial size and position
+	local win_opts = {
 		relative = "editor",
-		width = max_width,
-		height = max_height,
-		col = math.floor((vim.o.columns - max_width) / 2),
-		row = math.floor((vim.o.lines - max_height) / 2),
+		width = initial_geometry.width,
+		height = initial_geometry.height,
 		style = "minimal",
 		border = "double",
 		title = "cppman: " .. selection,
 		title_pos = "center",
-	})
+		zindex = 200,
+		row = initial_geometry.row,
+		col = initial_geometry.col,
+	}
 
+	local win = vim.api.nvim_open_win(buf, true, win_opts)
 	state.current_win = win
 
 	vim.api.nvim_win_set_option(win, "wrap", true)
@@ -328,6 +411,7 @@ local function create_cppman_buffer(selection, selection_number)
 	vim.api.nvim_win_set_option(win, "cursorline", true)
 
 	local opts = { silent = true, buffer = buf }
+
 	vim.keymap.set("n", "q", function()
 		safe_win_close(win)
 		safe_close(buf)
@@ -344,13 +428,11 @@ local function create_cppman_buffer(selection, selection_number)
 		local word = vim.fn.expand("<cword>")
 		if word and word ~= "" then
 			if state.current_page then
-				if state.current_page then
-					table.insert(state.stack, {
-						page = state.current_page,
-						selection_number = state.current_selection_number,
-					})
-					state.forward_stack = {}
-				end
+				table.insert(state.stack, {
+					page = state.current_page,
+					selection_number = state.current_selection_number,
+				})
+				state.forward_stack = {}
 			end
 			state.current_page = word
 			state.current_selection_number = nil
@@ -364,13 +446,11 @@ local function create_cppman_buffer(selection, selection_number)
 		local word = vim.fn.expand("<cword>")
 		if word and word ~= "" then
 			if state.current_page then
-				if state.current_page then
-					table.insert(state.stack, {
-						page = state.current_page,
-						selection_number = state.current_selection_number,
-					})
-					state.forward_stack = {}
-				end
+				table.insert(state.stack, {
+					page = state.current_page,
+					selection_number = state.current_selection_number,
+				})
+				state.forward_stack = {}
 			end
 			state.current_page = word
 			state.current_selection_number = nil
@@ -386,7 +466,6 @@ local function create_cppman_buffer(selection, selection_number)
 			safe_close(buf)
 			local prev = table.remove(state.stack)
 
-			-- push current page into forward stack
 			table.insert(state.forward_stack, {
 				page = state.current_page,
 				selection_number = state.current_selection_number,
@@ -404,13 +483,13 @@ local function create_cppman_buffer(selection, selection_number)
 			vim.notify("No previous page to go back to", vim.log.levels.INFO)
 		end
 	end, opts)
+
 	vim.keymap.set("n", "<C-i>", function()
 		if #state.forward_stack > 0 then
 			safe_win_close(win)
 			safe_close(buf)
 			local next_item = table.remove(state.forward_stack)
 
-			-- push current page into back stack
 			table.insert(state.stack, {
 				page = state.current_page,
 				selection_number = state.current_selection_number,
@@ -431,13 +510,11 @@ local function create_cppman_buffer(selection, selection_number)
 
 	-- Load content asynchronously with cache validation
 	execute_cppman(selection, selection_number, optimal_columns, function(lines)
-		if not vim.api.nvim_buf_is_valid(buf) then
+		if not vim.api.nvim_buf_is_valid(buf) or not vim.api.nvim_win_is_valid(win) then
 			return
 		end
 
-		-- Check if we got valid content
 		if #lines == 0 or (lines[1] and lines[1]:find("No output from cppman")) then
-			-- If no content, try to get from cache without selection number
 			if selection_number then
 				local fallback_cache_key = generate_cache_key(selection, nil, optimal_columns)
 				if state.cache[fallback_cache_key] then
@@ -445,7 +522,6 @@ local function create_cppman_buffer(selection, selection_number)
 				end
 			end
 
-			-- If still no content, show error
 			if #lines == 0 then
 				lines = { "No content available", "Press C-o to go back" }
 			end
@@ -455,6 +531,16 @@ local function create_cppman_buffer(selection, selection_number)
 		vim.bo[buf].modifiable = false
 		vim.bo[buf].readonly = true
 		vim.bo[buf].filetype = "c"
+
+		-- Resize and reposition window based on content
+		local geometry = calculate_window_size_and_position(lines, max_width, max_height, min_height)
+		vim.api.nvim_win_set_config(win, {
+			relative = "editor",
+			row = geometry.row,
+			col = geometry.col,
+			width = geometry.width,
+			height = geometry.height,
+		})
 	end)
 
 	return win, buf
@@ -462,28 +548,13 @@ end
 
 -- Show selection window for multiple options
 local function show_selection_window(word_to_search, options)
-	-- Calculate optimal columns for prefetching
+	-- Prefetch (async) based on configured limit
 	local max_width = math.min(M.config.max_width, vim.o.columns - 10)
 	local optimal_columns = calculate_optimal_columns(max_width)
-
-	-- Prefetch options based on M.configured limit
 	prefetch_top_options(word_to_search, options, optimal_columns)
 
 	-- Create selection window
 	local buf = vim.api.nvim_create_buf(false, true)
-	local width = 60
-	local height = math.min(20, #options + 4)
-	local win = vim.api.nvim_open_win(buf, true, {
-		relative = "editor",
-		width = width,
-		height = height,
-		col = math.floor((vim.o.columns - width) / 2),
-		row = math.floor((vim.o.lines - height) / 2),
-		style = "minimal",
-		border = "double",
-		title = "Select cppman entry",
-		title_pos = "center",
-	})
 
 	local lines = {}
 	for _, opt in ipairs(options) do
@@ -491,6 +562,24 @@ local function show_selection_window(word_to_search, options)
 	end
 	table.insert(lines, "")
 	table.insert(lines, "Enter selection number (1-" .. #options .. "):")
+
+	-- Calculate window size and position based on content
+	local geometry = calculate_window_size_and_position(lines, 60, 20, 5)
+
+	local win_opts = {
+		relative = "editor",
+		row = geometry.row,
+		col = geometry.col,
+		width = geometry.width,
+		height = geometry.height,
+		style = "minimal",
+		border = "double",
+		title = "Select cppman entry",
+		title_pos = "center",
+		zindex = 200,
+	}
+
+	local win = vim.api.nvim_open_win(buf, true, win_opts)
 
 	vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
 	vim.bo[buf].modifiable = false
@@ -506,19 +595,18 @@ local function show_selection_window(word_to_search, options)
 	vim.api.nvim_win_set_option(win, "cursorlineopt", "line")
 
 	local opts = { silent = true, buffer = buf }
+
 	vim.keymap.set("n", "<CR>", function()
 		local line = vim.api.nvim_get_current_line()
 		local selection_num = tonumber(line:match("%d+"))
 
 		if selection_num and selection_num >= 1 and selection_num <= #options then
-			if state.current_page then
-				if M.config.history_mode == "unified" then
-					table.insert(state.stack, {
-						page = state.current_page,
-						selection_number = state.current_selection_number,
-					})
-					state.forward_stack = {}
-				end
+			if state.current_page and M.config.history_mode == "unified" then
+				table.insert(state.stack, {
+					page = state.current_page,
+					selection_number = state.current_selection_number,
+				})
+				state.forward_stack = {}
 			end
 			vim.api.nvim_win_close(win, true)
 			safe_close(buf)
@@ -529,13 +617,13 @@ local function show_selection_window(word_to_search, options)
 			vim.notify("Invalid selection", vim.log.levels.ERROR)
 		end
 	end, opts)
+
 	vim.keymap.set("n", "<C-o>", function()
 		if #state.stack > 0 then
 			vim.api.nvim_win_close(win, true)
 			safe_close(buf)
 			local prev = table.remove(state.stack)
 
-			-- push current popup into forward stack
 			table.insert(state.forward_stack, {
 				page = state.current_page,
 				selection_number = state.current_selection_number,
@@ -552,14 +640,14 @@ local function show_selection_window(word_to_search, options)
 		else
 			vim.notify("No previous page to go back to", vim.log.levels.INFO)
 		end
-	end, { silent = true, buffer = buf })
+	end, opts)
+
 	vim.keymap.set("n", "<C-i>", function()
 		if #state.forward_stack > 0 then
 			vim.api.nvim_win_close(win, true)
 			safe_close(buf)
 			local next_item = table.remove(state.forward_stack)
 
-			-- push current popup into back stack
 			table.insert(state.stack, {
 				page = state.current_page,
 				selection_number = state.current_selection_number,
@@ -576,7 +664,8 @@ local function show_selection_window(word_to_search, options)
 		else
 			vim.notify("No forward page available", vim.log.levels.INFO)
 		end
-	end, { silent = true, buffer = buf })
+	end, opts)
+
 	vim.keymap.set("n", "q", function()
 		vim.api.nvim_win_close(win, true)
 		safe_close(buf)
