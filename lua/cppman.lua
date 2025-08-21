@@ -619,7 +619,7 @@ M.setup = function(opts)
 	-- Merge user configuration with defaults
 	opts = opts or {}
 	M.config = vim.tbl_deep_extend("force", M.config, opts)
-	vim.api.nvim_create_user_command("cppman", function(args)
+	vim.api.nvim_create_user_command("Fastcppman", function(args)
 		if args.args and #args.args > 1 then
 			M.open_cppman_for(args.args)
 		else
