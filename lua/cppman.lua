@@ -381,7 +381,14 @@ local function create_cppman_buffer(selection, selection_number)
 			local prev = table.remove(state.stack)
 			state.current_page = prev.page
 			state.current_selection_number = prev.selection_number
-			create_cppman_buffer(prev.page, prev.selection_number)
+
+			if prev.selection_number then
+				-- Restore exact man page
+				create_cppman_buffer(prev.page, prev.selection_number)
+			else
+				-- Re-run option parsing if no selection number
+				M.open_cppman_for(prev.page)
+			end
 		else
 			vim.notify("No previous page to go back to", vim.log.levels.INFO)
 		end
@@ -484,7 +491,18 @@ local function show_selection_window(word_to_search, options)
 			vim.notify("Invalid selection", vim.log.levels.ERROR)
 		end
 	end, opts)
-
+	vim.keymap.set("n", "<C-o>", function()
+		if #state.stack > 0 then
+			vim.api.nvim_win_close(win, true)
+			safe_close(buf)
+			local prev = table.remove(state.stack)
+			state.current_page = prev.page
+			state.current_selection_number = prev.selection_number
+			create_cppman_buffer(prev.page, prev.selection_number)
+		else
+			vim.notify("No previous page to go back to", vim.log.levels.INFO)
+		end
+	end, { silent = true, buffer = buf })
 	vim.keymap.set("n", "q", function()
 		vim.api.nvim_win_close(win, true)
 		safe_close(buf)
