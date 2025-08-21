@@ -24,6 +24,7 @@ local state = {
 	cache = {},
 	async_jobs = {}, -- Track active async jobs
 	async_queue = {}, -- Queue for async jobs when max limit reached
+	buffer_counter = 0, -- Counter to make buffer names unique
 }
 
 -- Utility functions
@@ -49,6 +50,12 @@ end
 -- Generate cache key efficiently
 local function generate_cache_key(selection, selection_number, columns)
 	return string.format("%s:%s:%s", selection, selection_number or "0", columns or "0")
+end
+
+-- Generate unique buffer name
+local function generate_buffer_name(selection)
+	state.buffer_counter = state.buffer_counter + 1
+	return string.format("cppman:%s:%d", selection, state.buffer_counter)
 end
 
 -- Async execute cppman using libuv
@@ -256,7 +263,8 @@ local function create_cppman_buffer(selection, selection_number)
 
 	vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "Loading cppman content..." })
 
-	vim.api.nvim_buf_set_name(buf, "cppman:" .. selection)
+	-- Use unique buffer name
+	vim.api.nvim_buf_set_name(buf, generate_buffer_name(selection))
 	vim.bo[buf].buftype = "nofile"
 	vim.bo[buf].bufhidden = "hide"
 	vim.bo[buf].swapfile = false
@@ -295,20 +303,26 @@ local function create_cppman_buffer(selection, selection_number)
 	end, opts)
 
 	vim.keymap.set("n", "K", function()
-		local word = vim.fn.expand("<cWORD>")
+		local word = vim.fn.expand("<cword>")
 		if word and word ~= "" then
 			if state.current_page then
-				table.insert(state.stack, state.current_page)
+				table.insert(
+					state.stack,
+					{ page = state.current_page, selection_number = state.current_selection_number }
+				)
 			end
 			state.current_page = word
+			state.current_selection_number = nil
 			create_cppman_buffer(word)
 		end
 	end, opts)
 
 	vim.keymap.set("n", "<C-o>", function()
 		if #state.stack > 0 then
-			state.current_page = table.remove(state.stack)
-			create_cppman_buffer(state.current_page)
+			local prev = table.remove(state.stack)
+			state.current_page = prev.page
+			state.current_selection_number = prev.selection_number
+			create_cppman_buffer(prev.page, prev.selection_number)
 		end
 	end, opts)
 
@@ -412,6 +426,7 @@ M.open_cppman_for = function(word_to_search)
 	if #options == 0 then
 		create_cppman_buffer(word_to_search)
 		state.current_page = word_to_search
+		state.current_selection_number = nil
 	else
 		-- Calculate optimal columns for prefetching
 		local max_width = math.min(config.max_width, vim.o.columns - 10)
@@ -462,10 +477,17 @@ M.open_cppman_for = function(word_to_search)
 			local selection_num = tonumber(line:match("%d+"))
 
 			if selection_num and selection_num >= 1 and selection_num <= #options then
+				if state.current_page then
+					table.insert(
+						state.stack,
+						{ page = state.current_page, selection_number = state.current_selection_number }
+					)
+				end
 				vim.api.nvim_win_close(win, true)
 				safe_close(buf)
 				create_cppman_buffer(word_to_search, selection_num)
 				state.current_page = options[selection_num].value
+				state.current_selection_number = selection_num
 			else
 				vim.notify("Invalid selection", vim.log.levels.ERROR)
 			end
