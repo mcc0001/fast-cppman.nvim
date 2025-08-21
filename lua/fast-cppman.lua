@@ -15,7 +15,7 @@ M.config = {
 	enable_async = true,
 	max_async_jobs = 5,
 	history_mode = "manpage",
-	position = "cursor",
+	position = "cursor", -- Can be "cursor" or "center"
 }
 
 local state = {
@@ -40,66 +40,84 @@ local state = {
 local function calculate_window_size_and_position(content_lines, max_width, max_height, min_height)
 	local ui = vim.api.nvim_list_uis()[1] or { width = vim.o.columns, height = vim.o.lines }
 
-	-- Use absolute screen position from initial_cursor
-	local abs_row = state.initial_cursor.row
-	local abs_col = state.initial_cursor.col
+	if M.config.position == "center" then
+		-- Center the window on screen
+		local content_height = #content_lines
+		local border_height = 2
+		local inner_height = math.min(max_height, math.max(min_height, content_height))
+		local total_height = inner_height + border_height
 
-	-- Calculate content height
-	local content_height = #content_lines
-	local border_height = 2 -- top and bottom border
-	local inner_height = math.min(max_height, math.max(min_height, content_height))
-	local total_height = inner_height + border_height
-
-	-- Calculate available space below and above cursor
-	local space_below = ui.height - (abs_row + 1)
-	local space_above = abs_row
-
-	-- Determine position (below or above cursor)
-	local position_below = space_below >= total_height or space_below >= space_above
-	local row
-
-	if position_below then
-		row = abs_row + 1
-		-- Adjust height if not enough space below
-		if space_below < total_height then
-			inner_height = math.min(max_height, math.max(min_height, space_below - border_height))
+		local max_line_length = 0
+		for _, line in ipairs(content_lines) do
+			max_line_length = math.max(max_line_length, #line)
 		end
+
+		local inner_width = math.min(max_width, math.max(20, max_line_length))
+		local border_width = 2
+		local total_width = inner_width + border_width
+
+		return {
+			row = math.floor((ui.height - total_height) / 2),
+			col = math.floor((ui.width - total_width) / 2),
+			width = inner_width,
+			height = inner_height,
+			total_width = total_width,
+			total_height = total_height,
+		}
 	else
-		row = abs_row - total_height
-		-- Adjust height if not enough space above
-		if space_above < total_height then
-			inner_height = math.min(max_height, math.max(min_height, space_above - border_height))
-			row = abs_row - (inner_height + border_height)
+		-- Original cursor-relative positioning
+		local abs_row = state.initial_cursor.row
+		local abs_col = state.initial_cursor.col
+
+		local content_height = #content_lines
+		local border_height = 2
+		local inner_height = math.min(max_height, math.max(min_height, content_height))
+		local total_height = inner_height + border_height
+
+		local space_below = ui.height - (abs_row + 1)
+		local space_above = abs_row
+
+		local position_below = space_below >= total_height or space_below >= space_above
+		local row
+
+		if position_below then
+			row = abs_row + 1
+			if space_below < total_height then
+				inner_height = math.min(max_height, math.max(min_height, space_below - border_height))
+			end
+		else
+			row = abs_row - total_height
+			if space_above < total_height then
+				inner_height = math.min(max_height, math.max(min_height, space_above - border_height))
+				row = abs_row - (inner_height + border_height)
+			end
+			row = math.max(0, row)
 		end
-		-- Ensure row doesn't go off-screen
-		row = math.max(0, row)
+
+		local max_line_length = 0
+		for _, line in ipairs(content_lines) do
+			max_line_length = math.max(max_line_length, #line)
+		end
+
+		local inner_width = math.min(max_width, math.max(20, max_line_length))
+		local border_width = 2
+		local total_width = inner_width + border_width
+
+		local col = abs_col - math.floor(total_width / 2)
+		if col + total_width > ui.width then
+			col = ui.width - total_width
+		end
+		col = math.max(0, col)
+
+		return {
+			row = row,
+			col = col,
+			width = inner_width,
+			height = inner_height,
+			total_width = total_width,
+			total_height = total_height,
+		}
 	end
-
-	-- Calculate width
-	local max_line_length = 0
-	for _, line in ipairs(content_lines) do
-		max_line_length = math.max(max_line_length, #line)
-	end
-
-	local inner_width = math.min(max_width, math.max(20, max_line_length))
-	local border_width = 2 -- left and right border
-	local total_width = inner_width + border_width
-
-	-- Calculate horizontal position
-	local col = abs_col - math.floor(total_width / 2)
-	if col + total_width > ui.width then
-		col = ui.width - total_width
-	end
-	col = math.max(0, col)
-
-	return {
-		row = row,
-		col = col,
-		width = inner_width,
-		height = inner_height,
-		total_width = total_width,
-		total_height = total_height,
-	}
 end
 
 -- Utility functions
