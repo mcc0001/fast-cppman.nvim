@@ -6,7 +6,7 @@ local uv = vim.loop
 local M = {}
 
 -- Default configuration
-local default_config = {
+M.config = {
 	max_prefetch_options = 10,
 	max_width = 100,
 	max_height = 30,
@@ -15,8 +15,6 @@ local default_config = {
 	max_async_jobs = 5, -- Maximum concurrent async jobs
 	history_mode = "manpage", -- "manpage" | "unified"
 }
-
-local config = vim.deepcopy(default_config)
 
 local state = {
 	stack = {},
@@ -79,7 +77,7 @@ local function execute_cppman_async(selection, selection_number, columns, callba
 	end
 
 	-- Check if we've reached the max async jobs limit
-	if #state.async_jobs >= config.max_async_jobs then
+	if #state.async_jobs >= M.config.max_async_jobs then
 		table.insert(state.async_queue, {
 			selection = selection,
 			selection_number = selection_number,
@@ -224,7 +222,7 @@ end
 
 -- Wrapper function to choose between async and sync execution
 local function execute_cppman(selection, selection_number, columns, callback)
-	if config.enable_async and callback then
+	if M.config.enable_async and callback then
 		execute_cppman_async(selection, selection_number, columns, callback)
 	else
 		local result = execute_cppman_sync(selection, selection_number, columns)
@@ -244,12 +242,12 @@ end
 
 -- Prefetch content for configurable number of options
 local function prefetch_top_options(word_to_search, options, columns)
-	if #options == 0 or not config.enable_async then
+	if #options == 0 or not M.config.enable_async then
 		return
 	end
 
 	-- Use configured limit
-	local limit = math.min(config.max_prefetch_options, #options)
+	local limit = math.min(M.config.max_prefetch_options, #options)
 
 	for i = 1, limit do
 		local option = options[i]
@@ -294,8 +292,8 @@ end
 
 -- Create a scrollable buffer with cppman content
 local function create_cppman_buffer(selection, selection_number)
-	local max_width = math.min(config.max_width, vim.o.columns - 10)
-	local max_height = math.min(config.max_height, vim.o.lines - 10)
+	local max_width = math.min(M.config.max_width, vim.o.columns - 10)
+	local max_height = math.min(M.config.max_height, vim.o.lines - 10)
 	local optimal_columns = calculate_optimal_columns(max_width)
 
 	local buf = vim.api.nvim_create_buf(false, true)
@@ -465,10 +463,10 @@ end
 -- Show selection window for multiple options
 local function show_selection_window(word_to_search, options)
 	-- Calculate optimal columns for prefetching
-	local max_width = math.min(config.max_width, vim.o.columns - 10)
+	local max_width = math.min(M.config.max_width, vim.o.columns - 10)
 	local optimal_columns = calculate_optimal_columns(max_width)
 
-	-- Prefetch options based on configured limit
+	-- Prefetch options based on M.configured limit
 	prefetch_top_options(word_to_search, options, optimal_columns)
 
 	-- Create selection window
@@ -514,7 +512,7 @@ local function show_selection_window(word_to_search, options)
 
 		if selection_num and selection_num >= 1 and selection_num <= #options then
 			if state.current_page then
-				if config.history_mode == "unified" then
+				if M.config.history_mode == "unified" then
 					table.insert(state.stack, {
 						page = state.current_page,
 						selection_number = state.current_selection_number,
@@ -617,10 +615,10 @@ local function show_selection_window(word_to_search, options)
 end
 
 -- Public API
-M.setup = function(user_config)
+M.setup = function(opts)
 	-- Merge user configuration with defaults
-	config = vim.tbl_deep_extend("force", config, user_config or {})
-
+	opts = opts or {}
+	M.config = vim.tbl_deep_extend("force", default_config, opts)
 	vim.api.nvim_create_user_command("cppman", function(args)
 		if args.args and #args.args > 1 then
 			M.open_cppman_for(args.args)
@@ -633,7 +631,7 @@ end
 M.input = function()
 	local input = Input({
 		position = "50%",
-		size = { width = config.input_width },
+		size = { width = M.config.input_width },
 		border = {
 			style = "double",
 			text = { top = "[Search cppman]", top_align = "center" },
