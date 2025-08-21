@@ -2,25 +2,26 @@
  A NeoVim plugin with a simple interface for the [cppman](https://github.com/ryanmjacobs/cppman) CLI tool,inspiring and fork from [cppman.nvim](https://github.com/madskjeldgaard/cppman.nvim)
 ] allowing you to easily search cplusplus.com and cppreference.com without ever leaving neovim.
  ## Installation
- Install using your favorite package manager. For example, with [Packer.nvim](https://github.com/wbthomason/packer.nvim):
+ Install using your favorite package manager. For example,
+##  with [LazyVim](https://www.lazyvim.org/configuration/lazy.nvim):
  ```lua
-use
-{
+return {
   "mcc0001/fast-cppman.nvim",
   ft = { "c", "cpp" },
 
-  requires = {
+  dependencies = {
     { "MunifTanjim/nui.nvim" },
   },
 
   opts = {
-    max_prefetch_options = 10,   -- Prefetch the top N options when multiple matches are found
-    max_width = 100,             -- Maximum width of the cppman window
-    max_height = 30,             -- Maximum height of the cppman window
-    input_width = 20,            -- Width of the input popup
-    enable_async = true,         -- Enable async operations (recommended)
-    max_async_jobs = 5,          -- Maximum number of concurrent async jobs
-    history_mode = "unified",    -- "manpage"  C-o / C-i only work in man page windows. |  "unified" → C-o / C-i work in both man page and popup.
+
+    max_prefetch_options = 10,
+    max_width = 100,
+    max_height = 30,
+    input_width = 20,
+    enable_async = true, -- Enable async operations
+    max_async_jobs = 5, -- Maximum concurrent async jobs
+    history_mode = "unified", -- "manpage" | "unified"
   },
   keys = {
     {
@@ -78,9 +79,11 @@ You can also call the functions directly:
  ```
  ## Navigation Inside cppman Buffer
  Once the cppman buffer is open, you can use the following keybindings:
- - `K`, `<C-]>`, and double-click (`<2-LeftMouse>`): Follow the word under the cursor (open its documentation).
- - `<C-o>`: Go back to the previous page.
- - `q` or `<ESC>`: Close the cppman window.
+- `K` or `<C-]>`: Follow the word under the cursor (open its documentation).
+- `<C-o>`: Go back to the previous page.
+- `<C-i>`: Go forward to the next page.
+- q or `<ESC>`: Close the cppman window.
+- `j/k`, `gg/G`: Navigate lines in selection windows.
  ## Features
  - Asynchronous execution for non-blocking UI.
  - Caching of results for faster subsequent lookups.
