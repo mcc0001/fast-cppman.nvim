@@ -19,6 +19,7 @@ local config = vim.deepcopy(default_config)
 
 local state = {
 	stack = {},
+	forward_stack = {},
 	current_page = nil,
 	current_buf = nil,
 	current_win = nil,
@@ -379,18 +380,47 @@ local function create_cppman_buffer(selection, selection_number)
 			safe_win_close(win)
 			safe_close(buf)
 			local prev = table.remove(state.stack)
+
+			-- push current page into forward stack
+			table.insert(state.forward_stack, {
+				page = state.current_page,
+				selection_number = state.current_selection_number,
+			})
+
 			state.current_page = prev.page
 			state.current_selection_number = prev.selection_number
 
 			if prev.selection_number then
-				-- Restore exact man page
 				create_cppman_buffer(prev.page, prev.selection_number)
 			else
-				-- Re-run option parsing if no selection number
 				M.open_cppman_for(prev.page)
 			end
 		else
 			vim.notify("No previous page to go back to", vim.log.levels.INFO)
+		end
+	end, opts)
+	vim.keymap.set("n", "<C-i>", function()
+		if #state.forward_stack > 0 then
+			safe_win_close(win)
+			safe_close(buf)
+			local next_item = table.remove(state.forward_stack)
+
+			-- push current page into back stack
+			table.insert(state.stack, {
+				page = state.current_page,
+				selection_number = state.current_selection_number,
+			})
+
+			state.current_page = next_item.page
+			state.current_selection_number = next_item.selection_number
+
+			if next_item.selection_number then
+				create_cppman_buffer(next_item.page, next_item.selection_number)
+			else
+				M.open_cppman_for(next_item.page)
+			end
+		else
+			vim.notify("No forward page available", vim.log.levels.INFO)
 		end
 	end, opts)
 
@@ -496,18 +526,47 @@ local function show_selection_window(word_to_search, options)
 			vim.api.nvim_win_close(win, true)
 			safe_close(buf)
 			local prev = table.remove(state.stack)
+
+			-- push current popup into forward stack
+			table.insert(state.forward_stack, {
+				page = state.current_page,
+				selection_number = state.current_selection_number,
+			})
+
 			state.current_page = prev.page
 			state.current_selection_number = prev.selection_number
 
 			if prev.selection_number then
-				-- Restore exact man page
 				create_cppman_buffer(prev.page, prev.selection_number)
 			else
-				-- Re-run option parsing if no selection number
 				M.open_cppman_for(prev.page)
 			end
 		else
 			vim.notify("No previous page to go back to", vim.log.levels.INFO)
+		end
+	end, { silent = true, buffer = buf })
+	vim.keymap.set("n", "<C-i>", function()
+		if #state.forward_stack > 0 then
+			vim.api.nvim_win_close(win, true)
+			safe_close(buf)
+			local next_item = table.remove(state.forward_stack)
+
+			-- push current popup into back stack
+			table.insert(state.stack, {
+				page = state.current_page,
+				selection_number = state.current_selection_number,
+			})
+
+			state.current_page = next_item.page
+			state.current_selection_number = next_item.selection_number
+
+			if next_item.selection_number then
+				create_cppman_buffer(next_item.page, next_item.selection_number)
+			else
+				M.open_cppman_for(next_item.page)
+			end
+		else
+			vim.notify("No forward page available", vim.log.levels.INFO)
 		end
 	end, { silent = true, buffer = buf })
 	vim.keymap.set("n", "q", function()
