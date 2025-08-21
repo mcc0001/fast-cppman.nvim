@@ -21,6 +21,7 @@ local state = {
 	stack = {},
 	current_page = nil,
 	current_buf = nil,
+	current_win = nil,
 	cache = {},
 	async_jobs = {}, -- Track active async jobs
 	async_queue = {}, -- Queue for async jobs when max limit reached
@@ -34,8 +35,15 @@ local function safe_close(bufnr)
 	end
 end
 
+local function safe_win_close(win_id)
+	if win_id and vim.api.nvim_win_is_valid(win_id) then
+		pcall(vim.api.nvim_win_close, win_id, true)
+	end
+end
+
 local function cleanup()
 	safe_close(state.current_buf)
+	safe_win_close(state.current_win)
 
 	-- Clean up any active async jobs
 	for _, job in ipairs(state.async_jobs) do
@@ -252,6 +260,36 @@ local function prefetch_top_options(word_to_search, options, columns)
 	end
 end
 
+-- Parse options synchronously
+local function parse_cppman_options(word_to_search)
+	local cache_key = "options_" .. word_to_search
+	if state.cache[cache_key] then
+		return state.cache[cache_key]
+	end
+
+	local result = vim.fn.system("cppman '" .. word_to_search:gsub("'", "'\\''") .. "' 2>&1")
+	local exit_code = vim.v.shell_error
+
+	if exit_code ~= 0 then
+		return {}
+	end
+
+	local options = {}
+	for line in result:gmatch("[^\r\n]+") do
+		if line:match("^%d+%.") then
+			local num, desc = line:match("^(%d+)%.%s*(.*)")
+			table.insert(options, {
+				num = tonumber(num),
+				text = desc,
+				value = desc:match("^[^ ]+") or desc,
+			})
+		end
+	end
+
+	state.cache[cache_key] = options
+	return options
+end
+
 -- Create a scrollable buffer with cppman content
 local function create_cppman_buffer(selection, selection_number)
 	local max_width = math.min(config.max_width, vim.o.columns - 10)
@@ -282,6 +320,8 @@ local function create_cppman_buffer(selection, selection_number)
 		title_pos = "center",
 	})
 
+	state.current_win = win
+
 	vim.api.nvim_win_set_option(win, "wrap", true)
 	vim.api.nvim_win_set_option(win, "number", false)
 	vim.api.nvim_win_set_option(win, "relativenumber", false)
@@ -289,17 +329,15 @@ local function create_cppman_buffer(selection, selection_number)
 
 	local opts = { silent = true, buffer = buf }
 	vim.keymap.set("n", "q", function()
-		if vim.api.nvim_win_is_valid(win) then
-			vim.api.nvim_win_close(win, true)
-		end
+		safe_win_close(win)
 		safe_close(buf)
+		cleanup()
 	end, opts)
 
 	vim.keymap.set("n", "<ESC>", function()
-		if vim.api.nvim_win_is_valid(win) then
-			vim.api.nvim_win_close(win, true)
-		end
+		safe_win_close(win)
 		safe_close(buf)
+		cleanup()
 	end, opts)
 
 	vim.keymap.set("n", "K", function()
@@ -313,7 +351,9 @@ local function create_cppman_buffer(selection, selection_number)
 			end
 			state.current_page = word
 			state.current_selection_number = nil
-			create_cppman_buffer(word)
+			safe_win_close(win)
+			safe_close(buf)
+			M.open_cppman_for(word)
 		end
 	end, opts)
 
@@ -321,15 +361,23 @@ local function create_cppman_buffer(selection, selection_number)
 		local word = vim.fn.expand("<cword>")
 		if word and word ~= "" then
 			if state.current_page then
-				table.insert(state.stack, state.current_page)
+				table.insert(
+					state.stack,
+					{ page = state.current_page, selection_number = state.current_selection_number }
+				)
 			end
 			state.current_page = word
-			create_cppman_buffer(word)
+			state.current_selection_number = nil
+			safe_win_close(win)
+			safe_close(buf)
+			M.open_cppman_for(word)
 		end
 	end, opts)
 
 	vim.keymap.set("n", "<C-o>", function()
 		if #state.stack > 0 then
+			safe_win_close(win)
+			safe_close(buf)
 			local prev = table.remove(state.stack)
 			state.current_page = prev.page
 			state.current_selection_number = prev.selection_number
@@ -352,34 +400,108 @@ local function create_cppman_buffer(selection, selection_number)
 	return win, buf
 end
 
--- Parse options synchronously
-local function parse_cppman_options(word_to_search)
-	local cache_key = "options_" .. word_to_search
-	if state.cache[cache_key] then
-		return state.cache[cache_key]
+-- Show selection window for multiple options
+local function show_selection_window(word_to_search, options)
+	-- Calculate optimal columns for prefetching
+	local max_width = math.min(config.max_width, vim.o.columns - 10)
+	local optimal_columns = calculate_optimal_columns(max_width)
+
+	-- Prefetch options based on configured limit
+	prefetch_top_options(word_to_search, options, optimal_columns)
+
+	-- Create selection window
+	local buf = vim.api.nvim_create_buf(false, true)
+	local width = 60
+	local height = math.min(20, #options + 4)
+	local win = vim.api.nvim_open_win(buf, true, {
+		relative = "editor",
+		width = width,
+		height = height,
+		col = math.floor((vim.o.columns - width) / 2),
+		row = math.floor((vim.o.lines - height) / 2),
+		style = "minimal",
+		border = "double",
+		title = "Select cppman entry",
+		title_pos = "center",
+	})
+
+	local lines = {}
+	for _, opt in ipairs(options) do
+		table.insert(lines, string.format("%2d. %s", opt.num, opt.text))
+	end
+	table.insert(lines, "")
+	table.insert(lines, "Enter selection number (1-" .. #options .. "):")
+
+	vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+	vim.bo[buf].modifiable = false
+	vim.bo[buf].bufhidden = "wipe"
+
+	vim.api.nvim_buf_set_option(buf, "syntax", "off")
+	for i = 1, #options do
+		vim.api.nvim_buf_add_highlight(buf, -1, "Number", i - 1, 0, 2)
+		vim.api.nvim_buf_add_highlight(buf, -1, "Identifier", i - 1, 3, -1)
 	end
 
-	local result = vim.fn.system("cppman '" .. word_to_search:gsub("'", "'\\''") .. "' 2>&1")
-	local exit_code = vim.v.shell_error
+	vim.api.nvim_win_set_option(win, "cursorline", true)
+	vim.api.nvim_win_set_option(win, "cursorlineopt", "line")
 
-	if exit_code ~= 0 then
-		return {}
-	end
+	local opts = { silent = true, buffer = buf }
+	vim.keymap.set("n", "<CR>", function()
+		local line = vim.api.nvim_get_current_line()
+		local selection_num = tonumber(line:match("%d+"))
 
-	local options = {}
-	for line in result:gmatch("[^\r\n]+") do
-		if line:match("^%d+%.") then
-			local num, desc = line:match("^(%d+)%.%s*(.*)")
-			table.insert(options, {
-				num = tonumber(num),
-				text = desc,
-				value = desc:match("^[^ ]+") or desc,
-			})
+		if selection_num and selection_num >= 1 and selection_num <= #options then
+			if state.current_page then
+				table.insert(
+					state.stack,
+					{ page = state.current_page, selection_number = state.current_selection_number }
+				)
+			end
+			vim.api.nvim_win_close(win, true)
+			safe_close(buf)
+			create_cppman_buffer(word_to_search, selection_num)
+			state.current_page = options[selection_num].value
+			state.current_selection_number = selection_num
+		else
+			vim.notify("Invalid selection", vim.log.levels.ERROR)
 		end
-	end
+	end, opts)
 
-	state.cache[cache_key] = options
-	return options
+	vim.keymap.set("n", "q", function()
+		vim.api.nvim_win_close(win, true)
+		safe_close(buf)
+		cleanup()
+	end, opts)
+
+	vim.keymap.set("n", "<ESC>", function()
+		vim.api.nvim_win_close(win, true)
+		safe_close(buf)
+		cleanup()
+	end, opts)
+
+	vim.keymap.set("n", "j", function()
+		local current_line = vim.api.nvim_win_get_cursor(win)[1]
+		if current_line < #options then
+			vim.api.nvim_win_set_cursor(win, { current_line + 1, 0 })
+		end
+	end, opts)
+
+	vim.keymap.set("n", "k", function()
+		local current_line = vim.api.nvim_win_get_cursor(win)[1]
+		if current_line > 1 then
+			vim.api.nvim_win_set_cursor(win, { current_line - 1, 0 })
+		end
+	end, opts)
+
+	vim.keymap.set("n", "gg", function()
+		vim.api.nvim_win_set_cursor(win, { 1, 0 })
+	end, opts)
+
+	vim.keymap.set("n", "G", function()
+		vim.api.nvim_win_set_cursor(win, { #options, 0 })
+	end, opts)
+
+	vim.api.nvim_win_set_cursor(win, { 1, 0 })
 end
 
 -- Public API
@@ -439,108 +561,7 @@ M.open_cppman_for = function(word_to_search)
 		state.current_page = word_to_search
 		state.current_selection_number = nil
 	else
-		-- Calculate optimal columns for prefetching
-		local max_width = math.min(config.max_width, vim.o.columns - 10)
-		local optimal_columns = calculate_optimal_columns(max_width)
-
-		-- Prefetch options based on configured limit
-		prefetch_top_options(word_to_search, options, optimal_columns)
-
-		-- Create selection window
-		local buf = vim.api.nvim_create_buf(false, true)
-		local width = 60
-		local height = math.min(20, #options + 4)
-		local win = vim.api.nvim_open_win(buf, true, {
-			relative = "editor",
-			width = width,
-			height = height,
-			col = math.floor((vim.o.columns - width) / 2),
-			row = math.floor((vim.o.lines - height) / 2),
-			style = "minimal",
-			border = "double",
-			title = "Select cppman entry",
-			title_pos = "center",
-		})
-
-		local lines = {}
-		for _, opt in ipairs(options) do
-			table.insert(lines, string.format("%2d. %s", opt.num, opt.text))
-		end
-		table.insert(lines, "")
-		table.insert(lines, "Enter selection number (1-" .. #options .. "):")
-
-		vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
-		vim.bo[buf].modifiable = false
-		vim.bo[buf].bufhidden = "wipe"
-
-		vim.api.nvim_buf_set_option(buf, "syntax", "off")
-		for i = 1, #options do
-			vim.api.nvim_buf_add_highlight(buf, -1, "Number", i - 1, 0, 2)
-			vim.api.nvim_buf_add_highlight(buf, -1, "Identifier", i - 1, 3, -1)
-		end
-
-		vim.api.nvim_win_set_option(win, "cursorline", true)
-		vim.api.nvim_win_set_option(win, "cursorlineopt", "line")
-
-		local opts = { silent = true, buffer = buf }
-		vim.keymap.set("n", "<CR>", function()
-			local line = vim.api.nvim_get_current_line()
-			local selection_num = tonumber(line:match("%d+"))
-
-			if selection_num and selection_num >= 1 and selection_num <= #options then
-				if state.current_page then
-					table.insert(
-						state.stack,
-						{ page = state.current_page, selection_number = state.current_selection_number }
-					)
-				end
-				vim.api.nvim_win_close(win, true)
-				safe_close(buf)
-				create_cppman_buffer(word_to_search, selection_num)
-				state.current_page = options[selection_num].value
-				state.current_selection_number = selection_num
-			else
-				vim.notify("Invalid selection", vim.log.levels.ERROR)
-			end
-		end, opts)
-
-		vim.keymap.set("n", "q", function()
-			vim.api.nvim_win_close(win, true)
-			safe_close(buf)
-			cleanup()
-		end, opts)
-
-		vim.keymap.set("n", "<ESC>", function()
-			vim.api.nvim_win_close(win, true)
-			safe_close(buf)
-			cleanup()
-		end, opts)
-
-		vim.keymap.set("n", "j", function()
-			local current_line = vim.api.nvim_win_get_cursor(win)[1]
-			if current_line < #options then
-				vim.api.nvim_win_set_cursor(win, { current_line + 1, 0 })
-			end
-		end, opts)
-
-		vim.keymap.set("n", "k", function()
-			local current_line = vim.api.nvim_win_get_cursor(win)[1]
-			if current_line > 1 then
-				vim.api.nvim_win_set_cursor(win, { current_line - 1, 0 })
-			end
-		end, opts)
-
-		vim.keymap.set("n", "gg", function()
-			vim.api.nvim_win_set_cursor(win, { 1, 0 })
-			cleanup()
-		end, opts)
-
-		vim.keymap.set("n", "G", function()
-			vim.api.nvim_win_set_cursor(win, { #options, 0 })
-			cleanup()
-		end, opts)
-
-		vim.api.nvim_win_set_cursor(win, { 1, 0 })
+		show_selection_window(word_to_search, options)
 	end
 end
 
