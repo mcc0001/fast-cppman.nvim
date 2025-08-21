@@ -39,15 +39,11 @@ local state = {
 -- Calculate optimal window size and position
 local function calculate_window_size_and_position(content_lines, max_width, max_height, min_height)
 	local ui = vim.api.nvim_list_uis()[1] or { width = vim.o.columns, height = vim.o.lines }
-	-- Use stored initial cursor position
-	local top = state.initial_cursor.top
-	local left = state.initial_cursor.left
-	local cur_row = state.initial_cursor.row
-	local cur_col = state.initial_cursor.col
 
-	-- Convert to 0-based editor grid coordinates
-	local abs_row = (top - 1) + (cur_row - 1)
-	local abs_col = (left - 1) + cur_col
+	-- Use absolute screen position from initial_cursor
+	local abs_row = state.initial_cursor.row
+	local abs_col = state.initial_cursor.col
+
 	-- Calculate content height
 	local content_height = #content_lines
 	local border_height = 2 -- top and bottom border
@@ -753,15 +749,14 @@ end
 M.open_cppman_for = function(word_to_search)
 	cleanup()
 
-	-- Store initial cursor position before creating any windows
+	-- Get current cursor screen position instead of buffer position
 	local win = vim.api.nvim_get_current_win()
-	local top, left = unpack(vim.fn.win_screenpos(win))
-	local cur = vim.api.nvim_win_get_cursor(win)
+	local cursor_pos = vim.api.nvim_win_get_cursor(win)
+	local screen_pos = vim.fn.screenpos(win, cursor_pos[1], cursor_pos[2])
+
 	state.initial_cursor = {
-		top = top,
-		left = left,
-		row = cur[1],
-		col = cur[2],
+		row = screen_pos.row - 1, -- Convert to 0-based indexing
+		col = screen_pos.col - 1,
 	}
 
 	-- Parse options synchronously
