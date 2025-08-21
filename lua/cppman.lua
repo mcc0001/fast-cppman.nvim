@@ -13,6 +13,7 @@ local default_config = {
 	input_width = 20,
 	enable_async = true, -- Enable async operations
 	max_async_jobs = 5, -- Maximum concurrent async jobs
+	history_mode = "manpage", -- "manpage" | "unified"
 }
 
 local config = vim.deepcopy(default_config)
@@ -345,10 +346,13 @@ local function create_cppman_buffer(selection, selection_number)
 		local word = vim.fn.expand("<cword>")
 		if word and word ~= "" then
 			if state.current_page then
-				table.insert(
-					state.stack,
-					{ page = state.current_page, selection_number = state.current_selection_number }
-				)
+				if state.current_page then
+					table.insert(state.stack, {
+						page = state.current_page,
+						selection_number = state.current_selection_number,
+					})
+					state.forward_stack = {}
+				end
 			end
 			state.current_page = word
 			state.current_selection_number = nil
@@ -362,10 +366,13 @@ local function create_cppman_buffer(selection, selection_number)
 		local word = vim.fn.expand("<cword>")
 		if word and word ~= "" then
 			if state.current_page then
-				table.insert(
-					state.stack,
-					{ page = state.current_page, selection_number = state.current_selection_number }
-				)
+				if state.current_page then
+					table.insert(state.stack, {
+						page = state.current_page,
+						selection_number = state.current_selection_number,
+					})
+					state.forward_stack = {}
+				end
 			end
 			state.current_page = word
 			state.current_selection_number = nil
@@ -507,10 +514,13 @@ local function show_selection_window(word_to_search, options)
 
 		if selection_num and selection_num >= 1 and selection_num <= #options then
 			if state.current_page then
-				table.insert(
-					state.stack,
-					{ page = state.current_page, selection_number = state.current_selection_number }
-				)
+				if config.history_mode == "unified" then
+					table.insert(state.stack, {
+						page = state.current_page,
+						selection_number = state.current_selection_number,
+					})
+					state.forward_stack = {}
+				end
 			end
 			vim.api.nvim_win_close(win, true)
 			safe_close(buf)
