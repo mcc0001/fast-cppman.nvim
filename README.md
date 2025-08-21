@@ -4,12 +4,41 @@
  ## Installation
  Install using your favorite package manager. For example, with [Packer.nvim](https://github.com/wbthomason/packer.nvim):
  ```lua
- use {
-   'mcc0001/fast-cppman.nvim',
-   requires = {
-     { 'MunifTanjim/nui.nvim' }
-   }
- }
+use
+{
+  "mcc0001/fast-cppman.nvim",
+  ft = { "c", "cpp" },
+
+  requires = {
+    { "MunifTanjim/nui.nvim" },
+  },
+
+  opts = {
+    max_prefetch_options = 10,   -- Prefetch the top N options when multiple matches are found
+    max_width = 100,             -- Maximum width of the cppman window
+    max_height = 30,             -- Maximum height of the cppman window
+    input_width = 20,            -- Width of the input popup
+    enable_async = true,         -- Enable async operations (recommended)
+    max_async_jobs = 5,          -- Maximum number of concurrent async jobs
+    history_mode = "unified",    -- "manpage"  C-o / C-i only work in man page windows. |  "unified" → C-o / C-i work in both man page and popup.
+  },
+  keys = {
+    {
+      "<leader>cp",
+      function()
+        require("cppman").open_cppman_for(vim.fn.expand("<cword>"))
+      end,
+      desc = "Search current function from cppman",
+    },
+    {
+      "<leader>cP",
+      function()
+        require("cppman").input()
+      end,
+      desc = "open cppman search box",
+    },
+  },
+}
  ```
  ## Configuration
  You can setup the plugin with the following code:
@@ -21,12 +50,15 @@
    input_width = 20,            -- Width of the input popup
    enable_async = true,         -- Enable async operations (recommended)
    max_async_jobs = 5,          -- Maximum number of concurrent async jobs
+   history_mode = "unified",    -- "manpage"  C-o / C-i only work in man page windows. |  "unified" → C-o / C-i work in both man page and popup.
  })
  ```
  ## Usage
- The plugin provides the following commands:
- - `:cppman [term]` - Open cppman for the given term, or prompt for a term if none provided.
- You can also call the functions directly:
+The plugin provides the following commands:
+
+`:Fastcppman [term]` - Open cppman for the given term, or prompt for a term if none provided.so call the functions directly:
+
+You can also call the functions directly:
  ```lua
  local cppman = require("fast-cppman")
  -- Open the search input
@@ -44,7 +76,7 @@
    cppman.input()
  end)
  ```
- ## Navigation
+ ## Navigation Inside cppman Buffer
  Once the cppman buffer is open, you can use the following keybindings:
  - `K`, `<C-]>`, and double-click (`<2-LeftMouse>`): Follow the word under the cursor (open its documentation).
  - `<C-o>`: Go back to the previous page.
@@ -54,5 +86,14 @@
  - Caching of results for faster subsequent lookups.
  - Prefetching of top N options when multiple matches are found.
  - Scrollable buffer with syntax highlighting.
- Note: This plugin requires the `cppman` CLI tool to be installed and available in your PATH.
- Let me know if you need any further adjustments.
+ ## Note:
+- Requires the cppman CLI tool installed and available in your PATH.
+- The plugin handles multi-page navigation, forward/back stacks, and unique buffer naming to allow multiple lookups in the same session.
+
+## Example Workflow
+1. Press `<leader>cP` to open the input popup.
+2. Type `std::vector` and press <Enter>.
+3. If multiple matches exist, select the correct entry.
+4. Navigate using `K` or `<C-]>`.
+5. Use `<C-o>` and `<C-i>` to navigate backward/forward between visited pages.
+6. Press `q` or `<ESC>` to close the window.
