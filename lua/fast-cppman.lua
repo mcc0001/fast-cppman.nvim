@@ -357,12 +357,11 @@ local function parse_cppman_options(word_to_search)
 	return options
 end
 
-local function prefetch_top_options(word_to_search, options, columns)
+local function prefetch_top_options(word_to_search, options, columns, callback)
 	if #options == 0 or not M.config.enable_async then
 		return
 	end
 
-	-- Use configured limit
 	local limit = math.min(M.config.max_prefetch_options, #options)
 
 	for i = 1, limit do
@@ -370,8 +369,13 @@ local function prefetch_top_options(word_to_search, options, columns)
 		local cache_key = generate_cache_key(word_to_search, option.num, columns)
 
 		if not state.cache[cache_key] then
-			-- Prefetch asynchronously without callback (fire and forget)
-			execute_cppman_async(word_to_search, option.num, columns, function() end)
+			execute_cppman_async(word_to_search, option.num, columns, function(content)
+				if callback then
+					callback(option.num)
+				end
+			end)
+		elseif callback then
+			callback(option.num)
 		end
 	end
 end
@@ -396,12 +400,14 @@ local function create_cppman_buffer(selection, selection_number)
 	local max_width = math.min(M.config.max_width, vim.o.columns)
 	local max_height = math.min(M.config.max_height, vim.o.lines)
 	local min_height = M.config.min_height
-	local optimal_columns = 80
+	local optimal_columns = calculate_optimal_columns(max_width)
+
+	-- Check if content is already cached
+	local cache_key = generate_cache_key(selection, selection_number, optimal_columns)
+	local cached_content = state.cache[cache_key]
 
 	local buf = vim.api.nvim_create_buf(false, true)
 	state.current_buf = buf
-
-	vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "Loading cppman content..." })
 
 	-- Use unique buffer name
 	vim.api.nvim_buf_set_name(buf, generate_buffer_name(selection))
@@ -411,7 +417,8 @@ local function create_cppman_buffer(selection, selection_number)
 	vim.bo[buf].modifiable = true
 
 	-- Create temporary window with minimal size to get proper positioning
-	local temp_geometry = calculate_window_size_and_position({ "Loading..." }, max_width, max_height, min_height)
+	local temp_lines = cached_content or { "Loading cppman content..." }
+	local temp_geometry = calculate_window_size_and_position(temp_lines, max_width, max_height, min_height)
 
 	local win_opts = {
 		relative = "editor",
@@ -434,7 +441,62 @@ local function create_cppman_buffer(selection, selection_number)
 	vim.api.nvim_win_set_option(win, "relativenumber", false)
 	vim.api.nvim_win_set_option(win, "cursorline", true)
 
-	-- Key mappings setup
+	-- If content is cached, use it immediately
+	if cached_content then
+		vim.api.nvim_buf_set_lines(buf, 0, -1, false, cached_content)
+		vim.bo[buf].modifiable = false
+		vim.bo[buf].readonly = true
+		vim.bo[buf].filetype = "c"
+
+		-- Resize window to fit content
+		local geometry = calculate_window_size_and_position(cached_content, max_width, max_height, min_height)
+		vim.api.nvim_win_set_config(win, {
+			relative = "editor",
+			row = geometry.row,
+			col = geometry.col,
+			width = geometry.width,
+			height = geometry.height,
+		})
+	else
+		-- Set loading message and fetch content asynchronously
+		vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "Loading cppman content..." })
+
+		execute_cppman(selection, selection_number, optimal_columns, function(lines)
+			if not vim.api.nvim_buf_is_valid(buf) or not vim.api.nvim_win_is_valid(win) then
+				return
+			end
+
+			if #lines == 0 or (lines[1] and lines[1]:find("No output from cppman")) then
+				if selection_number then
+					local fallback_cache_key = generate_cache_key(selection, nil, optimal_columns)
+					if state.cache[fallback_cache_key] then
+						lines = state.cache[fallback_cache_key]
+					end
+				end
+
+				if #lines == 0 then
+					lines = { "No content available", "Press C-o to go back" }
+				end
+			end
+
+			vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+			vim.bo[buf].modifiable = false
+			vim.bo[buf].readonly = true
+			vim.bo[buf].filetype = "c"
+
+			-- Resize and reposition window based on content
+			local geometry = calculate_window_size_and_position(lines, max_width, max_height, min_height)
+			vim.api.nvim_win_set_config(win, {
+				relative = "editor",
+				row = geometry.row,
+				col = geometry.col,
+				width = geometry.width,
+				height = geometry.height,
+			})
+		end)
+	end
+
+	-- Key mappings setup (same as before)
 	local opts = { silent = true, buffer = buf }
 
 	local function navigate_to_word()
@@ -505,56 +567,24 @@ local function create_cppman_buffer(selection, selection_number)
 		end
 	end, opts)
 
-	-- Load content asynchronously with cache validation
-	execute_cppman(selection, selection_number, optimal_columns, function(lines)
-		if not vim.api.nvim_buf_is_valid(buf) or not vim.api.nvim_win_is_valid(win) then
-			return
-		end
-
-		if #lines == 0 or (lines[1] and lines[1]:find("No output from cppman")) then
-			if selection_number then
-				local fallback_cache_key = generate_cache_key(selection, nil, optimal_columns)
-				if state.cache[fallback_cache_key] then
-					lines = state.cache[fallback_cache_key]
-				end
-			end
-
-			if #lines == 0 then
-				lines = { "No content available", "Press C-o to go back" }
-			end
-		end
-
-		vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
-		vim.bo[buf].modifiable = false
-		vim.bo[buf].readonly = true
-		vim.bo[buf].filetype = "c"
-
-		-- Resize and reposition window based on content
-		local geometry = calculate_window_size_and_position(lines, max_width, max_height, min_height)
-		vim.api.nvim_win_set_config(win, {
-			relative = "editor",
-			row = geometry.row,
-			col = geometry.col,
-			width = geometry.width,
-			height = geometry.height,
-		})
-	end)
-
 	return win, buf
 end
 
 local function show_selection_window(word_to_search, options)
 	-- Prefetch (async) based on configured limit
-	local max_width = math.min(M.config.max_width, vim.o.columns - 10)
+	local max_width = math.min(M.config.max_width, vim.o.columns)
 	local optimal_columns = calculate_optimal_columns(max_width)
-	prefetch_top_options(word_to_search, options, optimal_columns)
 
-	-- Create selection window
+	-- Create selection window first
 	local buf = vim.api.nvim_create_buf(false, true)
-
 	local lines = {}
+
+	-- Initialize status for each option
+	local option_status = {}
 	for _, opt in ipairs(options) do
-		table.insert(lines, string.format("%2d. %s", opt.num, opt.text))
+		local cache_key = generate_cache_key(word_to_search, opt.num, optimal_columns)
+		option_status[opt.num] = state.cache[cache_key] and "✓" or "⏳"
+		table.insert(lines, string.format("%s %2d. %s", option_status[opt.num], opt.num, opt.text))
 	end
 	table.insert(lines, "")
 	table.insert(lines, "Enter selection number (1-" .. #options .. "):")
@@ -583,12 +613,42 @@ local function show_selection_window(word_to_search, options)
 
 	vim.api.nvim_buf_set_option(buf, "syntax", "off")
 	for i = 1, #options do
-		vim.api.nvim_buf_add_highlight(buf, -1, "Number", i - 1, 0, 2)
-		vim.api.nvim_buf_add_highlight(buf, -1, "Identifier", i - 1, 3, -1)
+		vim.api.nvim_buf_add_highlight(buf, -1, "Number", i - 1, 2, 4)
+		vim.api.nvim_buf_add_highlight(buf, -1, "Identifier", i - 1, 6, -1)
 	end
 
 	vim.api.nvim_win_set_option(win, "cursorline", true)
 	vim.api.nvim_win_set_option(win, "cursorlineopt", "line")
+
+	-- Function to update the status of an option
+	local function update_option_status(option_num, status)
+		if not vim.api.nvim_buf_is_valid(buf) or not vim.api.nvim_win_is_valid(win) then
+			return
+		end
+
+		option_status[option_num] = status
+		local new_lines = {}
+		for i, opt in ipairs(options) do
+			table.insert(new_lines, string.format("%s %2d. %s", option_status[opt.num], opt.num, opt.text))
+		end
+		table.insert(new_lines, "")
+		table.insert(new_lines, "Enter selection number (1-" .. #options .. "):")
+
+		vim.bo[buf].modifiable = true
+		vim.api.nvim_buf_set_lines(buf, 0, -1, false, new_lines)
+		vim.bo[buf].modifiable = false
+
+		-- Reapply highlighting
+		for i = 1, #options do
+			vim.api.nvim_buf_add_highlight(buf, -1, "Number", i - 1, 2, 4)
+			vim.api.nvim_buf_add_highlight(buf, -1, "Identifier", i - 1, 6, -1)
+		end
+	end
+
+	-- Prefetch with callback to update status
+	prefetch_top_options(word_to_search, options, optimal_columns, function(option_num)
+		update_option_status(option_num, "✓")
+	end)
 
 	-- Key mappings setup
 	local opts = { silent = true, buffer = buf }
@@ -602,9 +662,26 @@ local function show_selection_window(word_to_search, options)
 				push_to_history(state.stack, state.current_page, state.current_selection_number)
 				state.forward_stack = {}
 			end
-			vim.api.nvim_win_close(win, true)
-			safe_close(buf)
-			create_cppman_buffer(word_to_search, selection_num)
+
+			-- Check if this content is already cached
+			local cache_key = generate_cache_key(word_to_search, selection_num, optimal_columns)
+			if state.cache[cache_key] then
+				-- Use cached content immediately
+				vim.api.nvim_win_close(win, true)
+				safe_close(buf)
+				create_cppman_buffer(word_to_search, selection_num)
+			else
+				-- Show loading message and fetch content
+				update_option_status(selection_num, "🔄")
+				execute_cppman(word_to_search, selection_num, optimal_columns, function(content)
+					if vim.api.nvim_buf_is_valid(buf) and vim.api.nvim_win_is_valid(win) then
+						vim.api.nvim_win_close(win, true)
+						safe_close(buf)
+						create_cppman_buffer(word_to_search, selection_num)
+					end
+				end)
+			end
+
 			state.current_page = word_to_search
 			state.current_selection_number = selection_num
 		else
