@@ -36,7 +36,42 @@ local state = {
 	},
 }
 
--- Calculate optimal window size and position
+-- Utility functions
+local function safe_close(bufnr)
+	if bufnr and vim.api.nvim_buf_is_valid(bufnr) then
+		pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
+	end
+end
+
+local function safe_win_close(win_id)
+	if win_id and vim.api.nvim_win_is_valid(win_id) then
+		pcall(vim.api.nvim_win_close, win_id, true)
+	end
+end
+
+local function cleanup()
+	safe_close(state.current_buf)
+	safe_win_close(state.current_win)
+
+	for _, job in ipairs(state.async_jobs) do
+		if job and job.handle and not job.handle:is_closing() then
+			job.handle:close()
+		end
+	end
+	state.async_jobs = {}
+	state.async_queue = {}
+end
+
+local function generate_cache_key(selection, selection_number, columns)
+	return string.format("%s:%s:%s", selection, selection_number or "0", columns or "0")
+end
+
+local function generate_buffer_name(selection)
+	state.buffer_counter = state.buffer_counter + 1
+	return string.format("cppman:%s:%d", selection, state.buffer_counter)
+end
+
+-- Window and geometry calculations
 local function calculate_window_size_and_position(content_lines, max_width, max_height, min_height)
 	local ui = vim.api.nvim_list_uis()[1] or { width = vim.o.columns, height = vim.o.lines }
 
@@ -65,7 +100,7 @@ local function calculate_window_size_and_position(content_lines, max_width, max_
 			total_height = total_height,
 		}
 	else
-		-- Original cursor-relative positioning
+		-- Cursor-relative positioning
 		local abs_row = state.initial_cursor.row
 		local abs_col = state.initial_cursor.col
 
@@ -120,44 +155,58 @@ local function calculate_window_size_and_position(content_lines, max_width, max_
 	end
 end
 
--- Utility functions
-local function safe_close(bufnr)
-	if bufnr and vim.api.nvim_buf_is_valid(bufnr) then
-		pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
-	end
+local function calculate_optimal_columns(window_width)
+	return math.max(40, window_width - 8)
 end
 
-local function safe_win_close(win_id)
-	if win_id and vim.api.nvim_win_is_valid(win_id) then
-		pcall(vim.api.nvim_win_close, win_id, true)
-	end
-end
+-- Cppman execution functions
+local function process_cppman_output(output)
+	local lines = vim.split(output, "\n", { trimempty = true })
+	local filtered_lines = {}
 
-local function cleanup()
-	safe_close(state.current_buf)
-	safe_win_close(state.current_win)
-
-	for _, job in ipairs(state.async_jobs) do
-		if job and job.handle and not job.handle:is_closing() then
-			job.handle:close()
+	for _, line in ipairs(lines) do
+		if line:find("Please enter the selection:") then
+			filtered_lines = {}
+		else
+			table.insert(filtered_lines, line)
 		end
 	end
-	state.async_jobs = {}
-	state.async_queue = {}
+
+	return filtered_lines
 end
 
--- Generate cache key efficiently
-local function generate_cache_key(selection, selection_number, columns)
-	return string.format("%s:%s:%s", selection, selection_number or "0", columns or "0")
+local function execute_cppman_sync(selection, selection_number, columns)
+	local cache_key = generate_cache_key(selection, selection_number, columns)
+	if state.cache[cache_key] then
+		return state.cache[cache_key]
+	end
+
+	local cmd = "cppman"
+	if columns then
+		cmd = cmd .. " --force-columns=" .. columns
+	end
+	cmd = cmd .. " '" .. selection:gsub("'", "'\\''") .. "' 2>&1"
+
+	if selection_number then
+		cmd = string.format("echo %d | %s", selection_number, cmd)
+	end
+
+	local result = vim.fn.system(cmd)
+	local exit_code = vim.v.shell_error
+
+	if exit_code ~= 0 then
+		return { "Error running cppman (exit code: " .. exit_code .. ")", "Command: " .. cmd }
+	end
+
+	local filtered_lines = process_cppman_output(result)
+
+	if #filtered_lines > 0 then
+		state.cache[cache_key] = filtered_lines
+	end
+
+	return #filtered_lines > 0 and filtered_lines or { "No output from cppman" }
 end
 
--- Generate unique buffer name
-local function generate_buffer_name(selection)
-	state.buffer_counter = state.buffer_counter + 1
-	return string.format("cppman:%s:%d", selection, state.buffer_counter)
-end
-
--- Async execute cppman using libuv
 local function execute_cppman_async(selection, selection_number, columns, callback)
 	local cache_key = generate_cache_key(selection, selection_number, columns)
 	if state.cache[cache_key] then
@@ -216,15 +265,7 @@ local function execute_cppman_async(selection, selection_number, columns, callba
 		end
 
 		local full_output = table.concat(output, "")
-		local lines = vim.split(full_output, "\n", { trimempty = true })
-		local filtered_lines = {}
-		for _, line in ipairs(lines) do
-			if line:find("Please enter the selection:") then
-				filtered_lines = {}
-			else
-				table.insert(filtered_lines, line)
-			end
-		end
+		local filtered_lines = process_cppman_output(full_output)
 
 		if #filtered_lines > 0 then
 			state.cache[cache_key] = filtered_lines
@@ -272,46 +313,6 @@ local function execute_cppman_async(selection, selection_number, columns, callba
 	uv.read_start(stderr, on_read)
 end
 
--- Synchronous execute cppman (fallback)
-local function execute_cppman_sync(selection, selection_number, columns)
-	local cache_key = generate_cache_key(selection, selection_number, columns)
-	if state.cache[cache_key] then
-		return state.cache[cache_key]
-	end
-
-	local cmd = "cppman"
-	if columns then
-		cmd = cmd .. " --force-columns=" .. columns
-	end
-	cmd = cmd .. " '" .. selection:gsub("'", "'\\''") .. "' 2>&1"
-
-	if selection_number then
-		cmd = string.format("echo %d | %s", selection_number, cmd)
-	end
-
-	local result = vim.fn.system(cmd)
-	local exit_code = vim.v.shell_error
-
-	if exit_code ~= 0 then
-		return { "Error running cppman (exit code: " .. exit_code .. ")", "Command: " .. cmd }
-	end
-
-	local lines = vim.split(result, "\n", { trimempty = true })
-	local filtered_lines = {}
-	for _, line in ipairs(lines) do
-		if not line:find("Please enter the selection:") then
-			table.insert(filtered_lines, line)
-		end
-	end
-
-	if #filtered_lines > 0 then
-		state.cache[cache_key] = filtered_lines
-	end
-
-	return #filtered_lines > 0 and filtered_lines or { "No output from cppman" }
-end
-
--- Wrapper function to choose between async and sync execution
 local function execute_cppman(selection, selection_number, columns, callback)
 	if M.config.enable_async and callback then
 		execute_cppman_async(selection, selection_number, columns, callback)
@@ -326,32 +327,7 @@ local function execute_cppman(selection, selection_number, columns, callback)
 	end
 end
 
--- Calculate optimal columns based on window width
-local function calculate_optimal_columns(window_width)
-	return math.max(40, window_width - 8)
-end
-
--- Prefetch content for configurable number of options
-local function prefetch_top_options(word_to_search, options, columns)
-	if #options == 0 or not M.config.enable_async then
-		return
-	end
-
-	-- Use configured limit
-	local limit = math.min(M.config.max_prefetch_options, #options)
-
-	for i = 1, limit do
-		local option = options[i]
-		local cache_key = generate_cache_key(word_to_search, option.num, columns)
-
-		if not state.cache[cache_key] then
-			-- Prefetch asynchronously without callback (fire and forget)
-			execute_cppman_async(word_to_search, option.num, columns, function() end)
-		end
-	end
-end
-
--- Parse options synchronously
+-- Option parsing and prefetching
 local function parse_cppman_options(word_to_search)
 	local cache_key = "options_" .. word_to_search
 	if state.cache[cache_key] then
@@ -381,12 +357,45 @@ local function parse_cppman_options(word_to_search)
 	return options
 end
 
--- Create a scrollable buffer with cppman content
+local function prefetch_top_options(word_to_search, options, columns)
+	if #options == 0 or not M.config.enable_async then
+		return
+	end
+
+	-- Use configured limit
+	local limit = math.min(M.config.max_prefetch_options, #options)
+
+	for i = 1, limit do
+		local option = options[i]
+		local cache_key = generate_cache_key(word_to_search, option.num, columns)
+
+		if not state.cache[cache_key] then
+			-- Prefetch asynchronously without callback (fire and forget)
+			execute_cppman_async(word_to_search, option.num, columns, function() end)
+		end
+	end
+end
+
+-- Navigation history management
+local function push_to_history(stack, page, selection_number)
+	table.insert(stack, {
+		page = page,
+		selection_number = selection_number,
+	})
+end
+
+local function pop_from_history(stack)
+	if #stack > 0 then
+		return table.remove(stack)
+	end
+	return nil
+end
+
+-- Window and buffer creation
 local function create_cppman_buffer(selection, selection_number)
 	local max_width = math.min(M.config.max_width, vim.o.columns)
 	local max_height = math.min(M.config.max_height, vim.o.lines)
 	local min_height = M.config.min_height
-	-- local optimal_columns = calculate_optimal_columns(max_width)
 	local optimal_columns = 80
 
 	local buf = vim.api.nvim_create_buf(false, true)
@@ -425,7 +434,23 @@ local function create_cppman_buffer(selection, selection_number)
 	vim.api.nvim_win_set_option(win, "relativenumber", false)
 	vim.api.nvim_win_set_option(win, "cursorline", true)
 
+	-- Key mappings setup
 	local opts = { silent = true, buffer = buf }
+
+	local function navigate_to_word()
+		local word = vim.fn.expand("<cword>")
+		if word and word ~= "" then
+			if state.current_page then
+				push_to_history(state.stack, state.current_page, state.current_selection_number)
+				state.forward_stack = {}
+			end
+			state.current_page = word
+			state.current_selection_number = nil
+			safe_win_close(win)
+			safe_close(buf)
+			M.open_cppman_for(word)
+		end
+	end
 
 	vim.keymap.set("n", "q", function()
 		safe_win_close(win)
@@ -439,53 +464,15 @@ local function create_cppman_buffer(selection, selection_number)
 		cleanup()
 	end, opts)
 
-	vim.keymap.set("n", "K", function()
-		local word = vim.fn.expand("<cword>")
-		if word and word ~= "" then
-			if state.current_page then
-				table.insert(state.stack, {
-					page = state.current_page,
-					selection_number = state.current_selection_number,
-				})
-				state.forward_stack = {}
-			end
-			state.current_page = word
-			state.current_selection_number = nil
-			safe_win_close(win)
-			safe_close(buf)
-			M.open_cppman_for(word)
-		end
-	end, opts)
-
-	vim.keymap.set("n", "<C-]>", function()
-		local word = vim.fn.expand("<cword>")
-		if word and word ~= "" then
-			if state.current_page then
-				table.insert(state.stack, {
-					page = state.current_page,
-					selection_number = state.current_selection_number,
-				})
-				state.forward_stack = {}
-			end
-			state.current_page = word
-			state.current_selection_number = nil
-			safe_win_close(win)
-			safe_close(buf)
-			M.open_cppman_for(word)
-		end
-	end, opts)
+	vim.keymap.set("n", "K", navigate_to_word, opts)
+	vim.keymap.set("n", "<C-]>", navigate_to_word, opts)
 
 	vim.keymap.set("n", "<C-o>", function()
-		if #state.stack > 0 then
+		local prev = pop_from_history(state.stack)
+		if prev then
 			safe_win_close(win)
 			safe_close(buf)
-			local prev = table.remove(state.stack)
-
-			table.insert(state.forward_stack, {
-				page = state.current_page,
-				selection_number = state.current_selection_number,
-			})
-
+			push_to_history(state.forward_stack, state.current_page, state.current_selection_number)
 			state.current_page = prev.page
 			state.current_selection_number = prev.selection_number
 
@@ -500,16 +487,11 @@ local function create_cppman_buffer(selection, selection_number)
 	end, opts)
 
 	vim.keymap.set("n", "<C-i>", function()
-		if #state.forward_stack > 0 then
+		local next_item = pop_from_history(state.forward_stack)
+		if next_item then
 			safe_win_close(win)
 			safe_close(buf)
-			local next_item = table.remove(state.forward_stack)
-
-			table.insert(state.stack, {
-				page = state.current_page,
-				selection_number = state.current_selection_number,
-			})
-
+			push_to_history(state.stack, state.current_page, state.current_selection_number)
 			state.current_page = next_item.page
 			state.current_selection_number = next_item.selection_number
 
@@ -561,7 +543,6 @@ local function create_cppman_buffer(selection, selection_number)
 	return win, buf
 end
 
--- Show selection window for multiple options
 local function show_selection_window(word_to_search, options)
 	-- Prefetch (async) based on configured limit
 	local max_width = math.min(M.config.max_width, vim.o.columns - 10)
@@ -609,6 +590,7 @@ local function show_selection_window(word_to_search, options)
 	vim.api.nvim_win_set_option(win, "cursorline", true)
 	vim.api.nvim_win_set_option(win, "cursorlineopt", "line")
 
+	-- Key mappings setup
 	local opts = { silent = true, buffer = buf }
 
 	vim.keymap.set("n", "<CR>", function()
@@ -617,10 +599,7 @@ local function show_selection_window(word_to_search, options)
 
 		if selection_num and selection_num >= 1 and selection_num <= #options then
 			if state.current_page and M.config.history_mode == "unified" then
-				table.insert(state.stack, {
-					page = state.current_page,
-					selection_number = state.current_selection_number,
-				})
+				push_to_history(state.stack, state.current_page, state.current_selection_number)
 				state.forward_stack = {}
 			end
 			vim.api.nvim_win_close(win, true)
@@ -630,54 +609,6 @@ local function show_selection_window(word_to_search, options)
 			state.current_selection_number = selection_num
 		else
 			vim.notify("Invalid selection", vim.log.levels.ERROR)
-		end
-	end, opts)
-
-	vim.keymap.set("n", "<C-o>", function()
-		if #state.stack > 0 then
-			vim.api.nvim_win_close(win, true)
-			safe_close(buf)
-			local prev = table.remove(state.stack)
-
-			table.insert(state.forward_stack, {
-				page = state.current_page,
-				selection_number = state.current_selection_number,
-			})
-
-			state.current_page = prev.page
-			state.current_selection_number = prev.selection_number
-
-			if prev.selection_number then
-				create_cppman_buffer(prev.page, prev.selection_number)
-			else
-				M.open_cppman_for(prev.page)
-			end
-		else
-			vim.notify("No previous page to go back to", vim.log.levels.INFO)
-		end
-	end, opts)
-
-	vim.keymap.set("n", "<C-i>", function()
-		if #state.forward_stack > 0 then
-			vim.api.nvim_win_close(win, true)
-			safe_close(buf)
-			local next_item = table.remove(state.forward_stack)
-
-			table.insert(state.stack, {
-				page = state.current_page,
-				selection_number = state.current_selection_number,
-			})
-
-			state.current_page = next_item.page
-			state.current_selection_number = next_item.selection_number
-
-			if next_item.selection_number then
-				create_cppman_buffer(next_item.page, next_item.selection_number)
-			else
-				M.open_cppman_for(next_item.page)
-			end
-		else
-			vim.notify("No forward page available", vim.log.levels.INFO)
 		end
 	end, opts)
 
@@ -693,6 +624,36 @@ local function show_selection_window(word_to_search, options)
 		cleanup()
 	end, opts)
 
+	local function navigate_history(direction_stack, opposite_stack)
+		if #direction_stack > 0 then
+			vim.api.nvim_win_close(win, true)
+			safe_close(buf)
+			local item = pop_from_history(direction_stack)
+
+			push_to_history(opposite_stack, state.current_page, state.current_selection_number)
+
+			state.current_page = item.page
+			state.current_selection_number = item.selection_number
+
+			if item.selection_number then
+				create_cppman_buffer(item.page, item.selection_number)
+			else
+				M.open_cppman_for(item.page)
+			end
+		else
+			vim.notify("No page available in that direction", vim.log.levels.INFO)
+		end
+	end
+
+	vim.keymap.set("n", "<C-o>", function()
+		navigate_history(state.stack, state.forward_stack)
+	end, opts)
+
+	vim.keymap.set("n", "<C-i>", function()
+		navigate_history(state.forward_stack, state.stack)
+	end, opts)
+
+	-- Navigation keys
 	vim.keymap.set("n", "j", function()
 		local current_line = vim.api.nvim_win_get_cursor(win)[1]
 		if current_line < #options then
