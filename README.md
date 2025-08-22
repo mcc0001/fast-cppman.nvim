@@ -14,7 +14,6 @@ return {
   },
 
   opts = {
-
     max_prefetch_options = 10,
     max_width = 100,
     max_height = 30,
@@ -22,6 +21,7 @@ return {
     enable_async = true, -- Enable async operations
     max_async_jobs = 5, -- Maximum concurrent async jobs
     history_mode = "unified", -- "manpage" | "unified"
+    position = "cursor", -- "cursor" or "center" - determines popup placement
   },
   keys = {
     {
