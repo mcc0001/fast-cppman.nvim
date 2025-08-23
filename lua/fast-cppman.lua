@@ -166,6 +166,22 @@ local function calculate_optimal_columns(window_width)
 	return math.max(40, window_width - 8)
 end
 
+-- Reusable window options generator
+local function get_win_opts(geometry, opts)
+	opts = opts or {}
+	local base_opts = {
+		relative = "editor",
+		row = geometry.row,
+		col = geometry.col,
+		width = geometry.width,
+		height = geometry.height,
+		style = "minimal",
+		border = "rounded",
+		zindex = 200,
+	}
+	return vim.tbl_extend("force", base_opts, opts)
+end
+
 -- Cppman execution functions
 local function process_cppman_output(output)
 	local lines = vim.split(output, "\n", { trimempty = true })
@@ -427,18 +443,7 @@ local function create_cppman_buffer(selection, selection_number)
 	local temp_lines = cached_content or { "Loading cppman content..." }
 	local temp_geometry = calculate_window_size_and_position(temp_lines, max_width, max_height, min_height)
 
-	local win_opts = {
-		relative = "editor",
-		width = temp_geometry.width,
-		height = temp_geometry.height,
-		style = "minimal",
-		border = "rounded",
-		zindex = 200,
-		row = temp_geometry.row,
-		col = temp_geometry.col,
-	}
-
-	local win = vim.api.nvim_open_win(buf, true, win_opts)
+	local win = vim.api.nvim_open_win(buf, true, get_win_opts(temp_geometry))
 	state.current_win = win
 
 	vim.api.nvim_win_set_option(win, "wrap", true)
@@ -597,18 +602,8 @@ local function show_selection_window(word_to_search, options)
 	-- Calculate window size and position based on content
 	local geometry = calculate_window_size_and_position(lines, 60, 20, 5)
 
-	local win_opts = {
-		relative = "editor",
-		row = geometry.row,
-		col = geometry.col,
-		width = geometry.width,
-		height = geometry.height,
-		style = "minimal",
-		border = "rounded",
-		zindex = 200,
-	}
-
-	local win = vim.api.nvim_open_win(buf, true, win_opts)
+	local win = vim.api.nvim_open_win(buf, true, get_win_opts(geometry))
+	state.current_win = win
 
 	vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
 	vim.bo[buf].modifiable = false
@@ -770,20 +765,19 @@ local function create_input_window()
 	local row = math.floor((ui.height - height) / 2)
 	local col = math.floor((ui.width - width) / 2)
 
-	local win_opts = {
-		relative = "editor",
-		row = row,
-		col = col,
-		width = width,
-		height = height,
-		style = "minimal",
-		border = "rounded",
-		title = "Search cppman",
-		title_pos = "center",
-		zindex = 200,
-	}
-
-	local win = vim.api.nvim_open_win(buf, true, win_opts)
+	local win = vim.api.nvim_open_win(
+		buf,
+		true,
+		get_win_opts({
+			row = row,
+			col = col,
+			width = width,
+			height = height,
+		}, {
+			title = "Search cppman",
+			title_pos = "center",
+		})
+	)
 
 	vim.bo[buf].buftype = "prompt"
 	vim.bo[buf].bufhidden = "wipe"
