@@ -382,6 +382,10 @@ local function parse_cppman_options(word_to_search)
 		end
 	end
 
+	if #options == 0 and result:find("error") then
+		return -1
+	end
+
 	state.cache[cache_key] = options
 	return options
 end
@@ -880,10 +884,13 @@ U.search_cppman = function(word_to_search)
 	-- Parse options synchronously
 	local options = parse_cppman_options(word_to_search)
 
-	if #options == 0 then
+	if type(options) == "table" and #options == 0 then
 		create_cppman_buffer(word_to_search)
 		state.current_page = word_to_search
 		state.current_selection_number = nil
+	elseif type(options) == "number" and options == -1 then
+		cleanup()
+		vim.lsp.buf.hover()
 	else
 		show_selection_window(word_to_search, options)
 	end
