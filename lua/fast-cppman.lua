@@ -61,6 +61,13 @@ local function cleanup()
 	state.async_queue = {}
 end
 
+local function clear_navigation()
+	state.stack = {}
+	state.forward_stack = {}
+	state.current_page = nil
+	state.current_selection_number = nil
+end
+
 local function generate_cache_key(selection, selection_number, columns)
 	return string.format("%s:%s:%s", selection, selection_number or "0", columns or "0")
 end
@@ -832,7 +839,7 @@ local function create_input_window()
 		if value and #value > 0 then
 			vim.api.nvim_win_close(input_win, true)
 			safe_close(buf)
-			U.search_cppman(value)
+			M.open_cppman_for(value)
 		else
 			vim.api.nvim_win_close(input_win, true)
 			safe_close(buf)
@@ -870,7 +877,7 @@ M.setup = function(opts)
 	M.config = vim.tbl_deep_extend("force", M.config, opts)
 	vim.api.nvim_create_user_command("Fastcppman", function(args)
 		if args.args and #args.args > 1 then
-			U.search_cppman(args.args)
+			M.open_cppman_for(args.args)
 		else
 			M.input()
 		end
@@ -907,8 +914,7 @@ M.open_cppman_for = function(word_to_search)
 	cleanup()
 
 	-- Clear navigation history when starting a new search
-	state.stack = {}
-	state.forward_stack = {}
+	clear_navigation()
 
 	-- Get current cursor screen position instead of buffer position
 	local win = vim.api.nvim_get_current_win()
