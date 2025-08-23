@@ -187,11 +187,16 @@ local function process_cppman_output(output)
 	local lines = vim.split(output, "\n", { trimempty = true })
 	local filtered_lines = {}
 
+	local firstLineInserted = false
 	for _, line in ipairs(lines) do
 		if line:find("Please enter the selection:") then
 			filtered_lines = {}
+			firstLineInserted = false
 		else
-			table.insert(filtered_lines, line)
+			if not (line:match("^%s*$") and not firstLineInserted) then
+				firstLineInserted = true
+				table.insert(filtered_lines, line)
+			end
 		end
 	end
 
