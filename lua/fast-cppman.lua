@@ -1,6 +1,7 @@
 local uv = vim.loop
 
 local M = {}
+local U = {}
 
 -- Default configuration
 M.config = {
@@ -525,7 +526,7 @@ local function create_cppman_buffer(selection, selection_number)
 			state.current_selection_number = nil
 			safe_win_close(win)
 			safe_close(buf)
-			M.open_cppman_for(word)
+			U.search_cppman(word)
 		end
 	end
 
@@ -556,7 +557,7 @@ local function create_cppman_buffer(selection, selection_number)
 			if prev.selection_number then
 				create_cppman_buffer(prev.page, prev.selection_number)
 			else
-				M.open_cppman_for(prev.page)
+				U.search_cppman(prev.page)
 			end
 		else
 			vim.notify("No previous page to go back to", vim.log.levels.INFO)
@@ -575,7 +576,7 @@ local function create_cppman_buffer(selection, selection_number)
 			if next_item.selection_number then
 				create_cppman_buffer(next_item.page, next_item.selection_number)
 			else
-				M.open_cppman_for(next_item.page)
+				U.search_cppman(next_item.page)
 			end
 		else
 			vim.notify("No forward page available", vim.log.levels.INFO)
@@ -718,7 +719,7 @@ local function show_selection_window(word_to_search, options)
 			if item.selection_number then
 				create_cppman_buffer(item.page, item.selection_number)
 			else
-				M.open_cppman_for(item.page)
+				U.search_cppman(item.page)
 			end
 		else
 			vim.notify("No page available in that direction", vim.log.levels.INFO)
@@ -826,7 +827,7 @@ local function create_input_window()
 		if value and #value > 0 then
 			vim.api.nvim_win_close(input_win, true)
 			safe_close(buf)
-			M.open_cppman_for(value)
+			U.search_cppman(value)
 		else
 			vim.api.nvim_win_close(input_win, true)
 			safe_close(buf)
@@ -864,7 +865,7 @@ M.setup = function(opts)
 	M.config = vim.tbl_deep_extend("force", M.config, opts)
 	vim.api.nvim_create_user_command("Fastcppman", function(args)
 		if args.args and #args.args > 1 then
-			M.open_cppman_for(args.args)
+			U.search_cppman(args.args)
 		else
 			M.input()
 		end
@@ -873,6 +874,19 @@ end
 
 M.input = function()
 	create_input_window()
+end
+
+U.search_cppman = function(word_to_search)
+	-- Parse options synchronously
+	local options = parse_cppman_options(word_to_search)
+
+	if #options == 0 then
+		create_cppman_buffer(word_to_search)
+		state.current_page = word_to_search
+		state.current_selection_number = nil
+	else
+		show_selection_window(word_to_search, options)
+	end
 end
 
 M.open_cppman_for = function(word_to_search)
@@ -892,16 +906,7 @@ M.open_cppman_for = function(word_to_search)
 		col = screen_pos.col - 1,
 	}
 
-	-- Parse options synchronously
-	local options = parse_cppman_options(word_to_search)
-
-	if #options == 0 then
-		create_cppman_buffer(word_to_search)
-		state.current_page = word_to_search
-		state.current_selection_number = nil
-	else
-		show_selection_window(word_to_search, options)
-	end
+	U.search_cppman(word_to_search)
 end
 
 return M
