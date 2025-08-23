@@ -69,6 +69,7 @@ return {
    enable_async = true,         -- Enable async operations (recommended)
    max_async_jobs = 5,          -- Maximum number of concurrent async jobs
    history_mode = "unified",    -- "manpage"  C-o / C-i only work in man page windows. |  "unified" → C-o / C-i work in both man page and popup.
+    position = "cursor", -- "cursor" or "center" - determines popup placement
  })
  ```
  ## Usage
