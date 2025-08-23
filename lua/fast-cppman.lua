@@ -8,7 +8,7 @@ local M = {}
 -- Default configuration
 M.config = {
 	max_prefetch_options = 10,
-	max_width = 100,
+	max_width = 80,
 	max_height = 30,
 	min_height = 5,
 	input_width = 20,
@@ -104,45 +104,55 @@ local function calculate_window_size_and_position(content_lines, max_width, max_
 		local abs_row = state.initial_cursor.row
 		local abs_col = state.initial_cursor.col
 
+		-- Calculate content dimensions
 		local content_height = #content_lines
 		local border_height = 2
 		local inner_height = math.min(max_height, math.max(min_height, content_height))
 		local total_height = inner_height + border_height
 
-		local space_below = ui.height - (abs_row + 1)
-		local space_above = abs_row
+		-- Determine available space and position
+		local space_below = ui.height - (abs_row + 1) -- +1 to account for current line
+		local space_above = abs_row -- No -1 here to eliminate the gap
 
-		local position_below = space_below >= total_height or space_below >= space_above
+		local position_below = space_below >= total_height or (space_below >= space_above and space_below >= min_height)
 		local row
 
 		if position_below then
-			row = abs_row + 1
+			-- Position below the current line
+			row = abs_row + 1 -- Start right below the cursor
 			if space_below < total_height then
 				inner_height = math.min(max_height, math.max(min_height, space_below - border_height))
 			end
 		else
-			row = abs_row - total_height
+			-- Position above the current line
+			row = abs_row - total_height -- Position directly above the cursor
 			if space_above < total_height then
 				inner_height = math.min(max_height, math.max(min_height, space_above - border_height))
-				row = abs_row - (inner_height + border_height)
+				row = math.max(0, abs_row - (inner_height + border_height))
 			end
-			row = math.max(0, row)
 		end
 
+		-- Calculate width
 		local max_line_length = 0
 		for _, line in ipairs(content_lines) do
 			max_line_length = math.max(max_line_length, #line)
 		end
-
 		local inner_width = math.min(max_width, math.max(20, max_line_length))
-		local border_width = 2
-		local total_width = inner_width + border_width
+		local total_width = inner_width + 2 -- account for borders
 
-		local col = abs_col - math.floor(total_width / 2)
-		if col + total_width > ui.width then
+		-- Calculate column position
+		local col
+		if abs_col + total_width <= ui.width then
+			-- If there's space to the right, align with cursor
+			col = abs_col
+		else
+			-- If not enough space, align with right edge of screen
 			col = ui.width - total_width
 		end
+
+		-- Ensure the window doesn't go off the edges
 		col = math.max(0, col)
+		row = math.max(0, row)
 
 		return {
 			row = row,
