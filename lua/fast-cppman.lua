@@ -7,14 +7,14 @@ local M = {}
 
 -- Default configuration
 M.config = {
-	max_prefetch_options = 10,
+	max_prefetch_options = 20,
 	max_width = 80,
-	max_height = 30,
+	max_height = 20,
 	min_height = 5,
 	input_width = 20,
 	enable_async = true,
 	max_async_jobs = 5,
-	history_mode = "manpage",
+	history_mode = "unified",
 	position = "cursor", -- Can be "cursor" or "center"
 }
 
@@ -785,7 +785,7 @@ M.input = function()
 		position = "50%",
 		size = { width = M.config.input_width },
 		border = {
-			style = "double",
+			style = "rounded",
 			text = { top = "[Search cppman]", top_align = "center" },
 		},
 		win_options = {
