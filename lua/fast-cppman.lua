@@ -906,6 +906,7 @@ U.search_cppman = function(word_to_search)
 		state.current_page = word_to_search
 		state.current_selection_number = nil
 	else
+		state.current_page = word_to_search
 		show_selection_window(word_to_search, options)
 	end
 end
