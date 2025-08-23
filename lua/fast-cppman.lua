@@ -1,6 +1,3 @@
-local Input = require("nui.input")
-local event = require("nui.utils.autocmd").event
-local Popup = require("nui.popup")
 local uv = vim.loop
 
 local M = {}
@@ -436,8 +433,6 @@ local function create_cppman_buffer(selection, selection_number)
 		height = temp_geometry.height,
 		style = "minimal",
 		border = "rounded",
-		-- title = "cppman: " .. selection,
-		-- title_pos = "center",
 		zindex = 200,
 		row = temp_geometry.row,
 		col = temp_geometry.col,
@@ -506,7 +501,7 @@ local function create_cppman_buffer(selection, selection_number)
 		end)
 	end
 
-	-- Key mappings setup (same as before)
+	-- Key mappings setup
 	local opts = { silent = true, buffer = buf }
 
 	local function navigate_to_word()
@@ -610,8 +605,6 @@ local function show_selection_window(word_to_search, options)
 		height = geometry.height,
 		style = "minimal",
 		border = "rounded",
-		-- title = "Select cppman entry",
-		-- title_pos = "center",
 		zindex = 200,
 	}
 
@@ -766,6 +759,71 @@ local function show_selection_window(word_to_search, options)
 	vim.api.nvim_win_set_cursor(win, { 1, 0 })
 end
 
+-- Input window creation
+local function create_input_window()
+	local buf = vim.api.nvim_create_buf(false, true)
+	local width = M.config.input_width
+	local height = 1
+
+	-- Calculate centered position
+	local ui = vim.api.nvim_list_uis()[1]
+	local row = math.floor((ui.height - height) / 2)
+	local col = math.floor((ui.width - width) / 2)
+
+	local win_opts = {
+		relative = "editor",
+		row = row,
+		col = col,
+		width = width,
+		height = height,
+		style = "minimal",
+		border = "rounded",
+		title = "Search cppman",
+		title_pos = "center",
+		zindex = 200,
+	}
+
+	local win = vim.api.nvim_open_win(buf, true, win_opts)
+
+	vim.bo[buf].buftype = "prompt"
+	vim.bo[buf].bufhidden = "wipe"
+	vim.fn.prompt_setprompt(buf, "> ")
+
+	local function on_submit(value)
+		if value and #value > 0 then
+			vim.api.nvim_win_close(win, true)
+			safe_close(buf)
+			M.open_cppman_for(value)
+		else
+			vim.api.nvim_win_close(win, true)
+			safe_close(buf)
+		end
+	end
+
+	vim.fn.prompt_setcallback(buf, on_submit)
+
+	vim.keymap.set("n", "q", function()
+		vim.api.nvim_win_close(win, true)
+		safe_close(buf)
+	end, { buffer = buf })
+
+	vim.keymap.set("n", "<ESC>", function()
+		vim.api.nvim_win_close(win, true)
+		safe_close(buf)
+	end, { buffer = buf })
+
+	vim.cmd("startinsert")
+
+	return {
+		unmount = function()
+			if vim.api.nvim_win_is_valid(win) then
+				vim.api.nvim_win_close(win, true)
+			end
+			safe_close(buf)
+		end,
+	}
+end
+
 -- Public API
 M.setup = function(opts)
 	-- Merge user configuration with defaults
@@ -781,35 +839,7 @@ M.setup = function(opts)
 end
 
 M.input = function()
-	local input = Input({
-		position = "50%",
-		size = { width = M.config.input_width },
-		border = {
-			style = "rounded",
-			text = { top = "[Search cppman]", top_align = "center" },
-		},
-		win_options = {
-			winhighlight = "Normal:Normal,FloatBorder:Normal",
-		},
-	}, {
-		prompt = "> ",
-		default_value = "",
-		on_submit = function(value)
-			M.open_cppman_for(value)
-		end,
-	})
-
-	input:mount()
-	input:on(event.BufLeave, function()
-		input:unmount()
-	end)
-
-	vim.keymap.set("n", "q", function()
-		input:unmount()
-	end, { silent = true, buffer = true })
-	vim.keymap.set("n", "<ESC>", function()
-		input:unmount()
-	end, { silent = true, buffer = true })
+	create_input_window()
 end
 
 M.open_cppman_for = function(word_to_search)
