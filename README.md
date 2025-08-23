@@ -1,6 +1,22 @@
  # fast-cppman.nvim
  A NeoVim plugin with a simple interface for the [cppman](https://github.com/ryanmjacobs/cppman) CLI tool,inspiring and fork from [cppman.nvim](https://github.com/madskjeldgaard/cppman.nvim)
 ] allowing you to easily search cplusplus.com and cppreference.com without ever leaving neovim.
+## Screenshots
+
+### Multiple match selection
+![Selection Window](./screenshots/selections.png)
+
+### Asynchronous cache multiple cppman pages
+![Asynchronous caching](./screenshots/asynccached.png)
+
+### Opened cppman manpage
+![fast-cppman Window](./screenshots/manpage_below.png)
+![fast-cppman Window](./screenshots/manpage_above.png)
+
+### Popup search input
+![Search Input](./screenshots/input.png)
+
+---
  ## Installation
  Install using your favorite package manager. For example,
 ##  with [LazyVim](https://www.lazyvim.org/configuration/lazy.nvim):
@@ -14,9 +30,10 @@ return {
   },
 
   opts = {
-    max_prefetch_options = 10,
-    max_width = 100,
-    max_height = 30,
+    max_prefetch_options = 20,
+    max_width = 80,
+    max_height = 20,
+    min_height = 5,
     input_width = 20,
     enable_async = true, -- Enable async operations
     max_async_jobs = 5, -- Maximum concurrent async jobs
@@ -52,6 +69,7 @@ return {
    enable_async = true,         -- Enable async operations (recommended)
    max_async_jobs = 5,          -- Maximum number of concurrent async jobs
    history_mode = "unified",    -- "manpage"  C-o / C-i only work in man page windows. |  "unified" → C-o / C-i work in both man page and popup.
+    position = "cursor", -- "cursor" or "center" - determines popup placement
  })
  ```
  ## Usage
