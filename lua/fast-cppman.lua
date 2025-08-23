@@ -219,7 +219,8 @@ local function execute_cppman_sync(selection, selection_number, columns)
 		return state.cache[cache_key]
 	end
 
-	local cmd = "cppman"
+	local cmd = "COLUMNS=" .. tostring(columns) .. " cppman"
+
 	if columns then
 		cmd = cmd .. " --force-columns=" .. columns
 	end
@@ -265,7 +266,7 @@ local function execute_cppman_async(selection, selection_number, columns, callba
 		return
 	end
 
-	local cmd = "cppman"
+	local cmd = "COLUMNS=" .. tostring(columns) .. " cppman"
 	if columns then
 		cmd = cmd .. " --force-columns=" .. columns
 	end
