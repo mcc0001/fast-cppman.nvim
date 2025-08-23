@@ -14,6 +14,7 @@ M.config = {
 	max_async_jobs = 5,
 	history_mode = "unified",
 	position = "cursor", -- Can be "cursor" or "center"
+	fallback_to_lsp_hover = true,
 }
 
 local state = {
@@ -883,14 +884,20 @@ end
 U.search_cppman = function(word_to_search)
 	-- Parse options synchronously
 	local options = parse_cppman_options(word_to_search)
-
-	if type(options) == "table" and #options == 0 then
+	-- number
+	if type(options) == "number" and options == -1 then
+		cleanup()
+		-- Only fall back to LSP if configured to do so
+		if M.config.fallback_to_lsp_hover then
+			vim.lsp.buf.hover()
+		else
+			vim.notify("No cppman entry found for: " .. word_to_search, vim.log.levels.ERROR)
+		end
+	-- table
+	elseif #options == 0 then
 		create_cppman_buffer(word_to_search)
 		state.current_page = word_to_search
 		state.current_selection_number = nil
-	elseif type(options) == "number" and options == -1 then
-		cleanup()
-		vim.lsp.buf.hover()
 	else
 		show_selection_window(word_to_search, options)
 	end
