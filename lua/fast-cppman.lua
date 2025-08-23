@@ -845,6 +845,10 @@ end
 M.open_cppman_for = function(word_to_search)
 	cleanup()
 
+	-- Clear navigation history when starting a new search
+	state.stack = {}
+	state.forward_stack = {}
+
 	-- Get current cursor screen position instead of buffer position
 	local win = vim.api.nvim_get_current_win()
 	local cursor_pos = vim.api.nvim_win_get_cursor(win)
