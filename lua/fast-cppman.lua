@@ -15,6 +15,7 @@ M.config = {
 	history_mode = "unified",
 	position = "cursor", -- Can be "cursor" or "center"
 	fallback_to_lsp_hover = true,
+	auto_select_first_match = false,
 }
 
 local state = {
@@ -907,7 +908,13 @@ U.search_cppman = function(word_to_search)
 		state.current_selection_number = nil
 	else
 		state.current_page = word_to_search
-		show_selection_window(word_to_search, options)
+		if M.config.auto_select_first_match then
+			-- Automatically select the first option
+			state.current_selection_number = options[1].num
+			create_cppman_buffer(word_to_search, options[1].num)
+		else
+			show_selection_window(word_to_search, options)
+		end
 	end
 end
 

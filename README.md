@@ -39,16 +39,17 @@ return {
   ft = { "c", "cpp" },
 
   opts = {
-    max_prefetch_options = 20,   -- Prefetch top N options when multiple matches found
-    max_width = 80,              -- Maximum width of cppman window
-    max_height = 20,             -- Maximum height of cppman window
-    min_height = 5,              -- Minimum height of cppman window
-    input_width = 20,            -- Width of input popup
-    enable_async = true,         -- Enable async operations
-    max_async_jobs = 5,          -- Maximum concurrent async jobs
-    history_mode = "unified",    -- "unified" or "manpage" navigation history
-    position = "cursor",         -- "cursor" or "center" window placement
-    fallback_to_lsp_hover = true,-- Fall back to LSP hover when no cppman results
+    max_prefetch_options = 20,      -- Prefetch top N options when multiple matches found
+    max_width = 80,                 -- Maximum width of cppman window
+    max_height = 20,                -- Maximum height of cppman window
+    min_height = 5,                 -- Minimum height of cppman window
+    input_width = 20,               -- Width of input popup
+    enable_async = true,            -- Enable async operations
+    max_async_jobs = 5,             -- Maximum concurrent async jobs
+    history_mode = "unified",       -- "unified" or "manpage" navigation history
+    position = "cursor",            -- "cursor" or "center" window placement
+    fallback_to_lsp_hover = true,   -- Fall back to LSP hover when no cppman results
+    auto_select_first_match = false -- True: never show up selections and choosing the first match
   },
   keys = {
     {
@@ -72,18 +73,61 @@ return {
  You can setup the plugin with the following code:
  ```lua
  require("fast-cppman").setup({
-  max_prefetch_options = 20,   -- Prefetch top N options when multiple matches found
-  max_width = 80,              -- Maximum width of cppman window
-  max_height = 20,             -- Maximum height of cppman window
-  min_height = 5,              -- Minimum height of cppman window
-  input_width = 20,            -- Width of input popup
-  enable_async = true,         -- Enable async operations
-  max_async_jobs = 5,          -- Maximum concurrent async jobs
-  history_mode = "unified",    -- "unified" or "manpage" navigation history
-  position = "cursor",         -- "cursor" or "center" window placement
-  fallback_to_lsp_hover = true,-- Fall back to LSP hover when no cppman results
+  max_prefetch_options = 20,      -- Prefetch top N options when multiple matches found
+  max_width = 80,                 -- Maximum width of cppman window
+  max_height = 20,                -- Maximum height of cppman window
+  min_height = 5,                 -- Minimum height of cppman window
+  input_width = 20,               -- Width of input popup
+  enable_async = true,            -- Enable async operations
+  max_async_jobs = 5,             -- Maximum concurrent async jobs
+  history_mode = "unified",       -- "unified" or "manpage" navigation history
+  position = "cursor",            -- "cursor" or "center" window placement
+  fallback_to_lsp_hover = true,   -- Fall back to LSP hover when no cppman results
+  auto_select_first_match = false -- True: never show up selections and choosing the first match
  })
  ```
+
+## Integration with LSP
+You can configure the plugin to use the same keybinding for both fast-cppman and LSP hover documentation. When pressed, it will first try to show cppman documentation, and if that fails, it will fall back to LSP documentation.
+
+#### Example Configuration
+```lua
+return {
+  "neovim/nvim-lspconfig",
+  opts = {
+    servers = {
+      clangd = {
+        on_attach = function(client, bufnr)
+          vim.keymap.set("n", "K", function()
+            local word = vim.fn.expand("<cword>")
+            if word ~= "" then
+              vim.cmd("Fastcppman " .. word)
+            else
+              vim.notify("No word under cursor")
+            end
+          end, { buffer = bufnr, noremap = true, silent = true })
+        end,
+      },
+    },
+  },
+}
+```
+This configuration sets up the K key to:
+
+1. First try to find documentation using fast-cppman
+
+2. If no cppman entry is found (and fallback_to_lsp_hover is enabled), automatically fall back to LSP hover documentation
+
+3. If there's no word under cursor, show a notification
+
+Make sure to enable the fallback option in your cppman configuration:
+
+```lua
+require('cppman').setup({
+  fallback_to_lsp_hover = true, -- Enable LSP fallback
+  -- other options...
+})
+```
 ## Usage
 The plugin provides the following commands:
 
