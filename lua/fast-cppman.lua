@@ -760,24 +760,58 @@ local function create_input_window()
 	local width = M.config.input_width
 	local height = 1
 
-	-- Calculate centered position
-	local ui = vim.api.nvim_list_uis()[1]
-	local row = math.floor((ui.height - height) / 2)
-	local col = math.floor((ui.width - width) / 2)
+	-- Get current cursor position
+	local win = vim.api.nvim_get_current_win()
+	local cursor_pos = vim.api.nvim_win_get_cursor(win)
+	local screen_pos = vim.fn.screenpos(win, cursor_pos[1], cursor_pos[2])
 
-	local win = vim.api.nvim_open_win(
-		buf,
-		true,
-		get_win_opts({
+	local ui = vim.api.nvim_list_uis()[1]
+	local geometry
+
+	if M.config.position == "center" then
+		-- Center the window
+		geometry = {
+			row = math.floor((ui.height - height) / 2),
+			col = math.floor((ui.width - width) / 2),
+			width = width,
+			height = height,
+		}
+	else
+		-- Position relative to cursor
+		local abs_row = screen_pos.row - 1 -- Convert to 0-based
+		local abs_col = screen_pos.col - 1 -- Convert to 0-based
+
+		local space_below = ui.height - (abs_row + 1)
+		local space_above = abs_row
+
+		local row
+		if space_below >= height then
+			row = abs_row + 1
+		else
+			row = abs_row - height
+		end
+
+		-- Adjust column to not go off-screen
+		local col = abs_col
+		if abs_col + width > ui.width then
+			col = ui.width - width
+		end
+
+		geometry = {
 			row = row,
 			col = col,
 			width = width,
 			height = height,
-		}, {
-			title = "Search cppman",
-			title_pos = "center",
-		})
-	)
+		}
+	end
+
+	local win_opts = get_win_opts(geometry, {
+		title = "Search cppman",
+		title_pos = "center",
+	})
+
+	local input_win = vim.api.nvim_open_win(buf, true, win_opts)
+	state.current_win = input_win
 
 	vim.bo[buf].buftype = "prompt"
 	vim.bo[buf].bufhidden = "wipe"
@@ -785,11 +819,11 @@ local function create_input_window()
 
 	local function on_submit(value)
 		if value and #value > 0 then
-			vim.api.nvim_win_close(win, true)
+			vim.api.nvim_win_close(input_win, true)
 			safe_close(buf)
 			M.open_cppman_for(value)
 		else
-			vim.api.nvim_win_close(win, true)
+			vim.api.nvim_win_close(input_win, true)
 			safe_close(buf)
 		end
 	end
@@ -797,12 +831,12 @@ local function create_input_window()
 	vim.fn.prompt_setcallback(buf, on_submit)
 
 	vim.keymap.set("n", "q", function()
-		vim.api.nvim_win_close(win, true)
+		vim.api.nvim_win_close(input_win, true)
 		safe_close(buf)
 	end, { buffer = buf })
 
 	vim.keymap.set("n", "<ESC>", function()
-		vim.api.nvim_win_close(win, true)
+		vim.api.nvim_win_close(input_win, true)
 		safe_close(buf)
 	end, { buffer = buf })
 
@@ -810,8 +844,8 @@ local function create_input_window()
 
 	return {
 		unmount = function()
-			if vim.api.nvim_win_is_valid(win) then
-				vim.api.nvim_win_close(win, true)
+			if vim.api.nvim_win_is_valid(input_win) then
+				vim.api.nvim_win_close(input_win, true)
 			end
 			safe_close(buf)
 		end,
