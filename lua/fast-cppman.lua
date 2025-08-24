@@ -558,41 +558,54 @@ local function parse_options(word_to_search)
 	local command_info = get_command_info()
 
 	if command_info.cmd == "man" then
-		-- man doesn't have selection options
-		return {}
-	end
-
-	-- cppman option parsing
-	local cache_key = "options_" .. word_to_search
-	if state.cache[cache_key] then
-		return state.cache[cache_key]
-	end
-
-	local result = vim.fn.system("cppman '" .. word_to_search:gsub("'", "'\\''") .. "' 2>&1")
-	local exit_code = vim.v.shell_error
-
-	if exit_code ~= 0 then
-		return {}
-	end
-
-	local options = {}
-	for line in result:gmatch("[^\r\n]+") do
-		if line:match("^%d+%.") then
-			local num, desc = line:match("^(%d+)%.%s*(.*)")
-			table.insert(options, {
-				num = tonumber(num),
-				text = desc,
-				value = desc:match("^[^ ]+") or desc,
-			})
+		-- Check if man page exists
+		-- Check if man page exists by trying to execute it with minimal output
+		local cache_key = "man_exists_" .. word_to_search
+		if state.cache[cache_key] ~= nil then
+			return state.cache[cache_key] and {} or -1
 		end
-	end
 
-	if #options == 0 and result:find("error") then
-		return -1
-	end
+		-- Use execute_man_sync to test if page exists (with minimal columns to reduce processing)
+		local test_result = execute_man_sync(word_to_search, 10)
 
-	state.cache[cache_key] = options
-	return options
+		-- Check if the result indicates "No manual entry"
+		local exists = not (test_result[1] and test_result[1]:find("No manual entry for"))
+		state.cache[cache_key] = exists
+
+		return exists and {} or -1
+	else
+		-- cppman option parsing
+		local cache_key = "options_" .. word_to_search
+		if state.cache[cache_key] then
+			return state.cache[cache_key]
+		end
+
+		local result = vim.fn.system("cppman '" .. word_to_search:gsub("'", "'\\''") .. "' 2>&1")
+		local exit_code = vim.v.shell_error
+
+		if exit_code ~= 0 then
+			return {}
+		end
+
+		local options = {}
+		for line in result:gmatch("[^\r\n]+") do
+			if line:match("^%d+%.") then
+				local num, desc = line:match("^(%d+)%.%s*(.*)")
+				table.insert(options, {
+					num = tonumber(num),
+					text = desc,
+					value = desc:match("^[^ ]+") or desc,
+				})
+			end
+		end
+
+		if #options == 0 and result:find("error") then
+			return -1
+		end
+
+		state.cache[cache_key] = options
+		return options
+	end
 end
 
 local function prefetch_top_options(word_to_search, options, columns, callback)
