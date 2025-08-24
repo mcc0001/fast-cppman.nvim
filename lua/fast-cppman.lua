@@ -364,7 +364,7 @@ local function execute_man_async(selection, columns, callback)
 		-- Process next job in queue if any
 		if #state.async_queue > 0 then
 			local next_job = table.remove(state.async_queue, 1)
-			execute_command(next_job.selection, next_job.selection_number, next_job.columns, next_job.callback)
+			execute_man_async(next_job.selection, next_job.columns, next_job.callback)
 		end
 
 		if code ~= 0 then
@@ -471,7 +471,7 @@ local function execute_cppman_async(selection, selection_number, columns, callba
 		-- Process next job in queue if any
 		if #state.async_queue > 0 then
 			local next_job = table.remove(state.async_queue, 1)
-			execute_command(next_job.selection, next_job.selection_number, next_job.columns, next_job.callback)
+			execute_cppman_async(next_job.selection, next_job.selection_number, next_job.columns, next_job.callback)
 		end
 
 		if code ~= 0 then
