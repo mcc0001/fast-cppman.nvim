@@ -16,6 +16,27 @@ M.config = {
 	position = "cursor", -- Can be "cursor" or "center"
 	fallback_to_lsp_hover = true,
 	auto_select_first_match = false,
+	-- Filetype-specific command configurations
+	filetype_commands = {
+		-- For C files, use man with section 3
+		c = {
+			cmd = "cppman",
+			args = "",
+			has_selection = true,
+		},
+		-- For C++ files, use cppman
+		cpp = {
+			cmd = "cppman",
+			args = "",
+			has_selection = true,
+		},
+		-- Default fallback (used for other filetypes)
+		default = {
+			cmd = "cppman",
+			args = "",
+			has_selection = true,
+		},
+	},
 }
 
 local state = {
@@ -88,20 +109,15 @@ local function get_command_info()
 
 	-- Otherwise determine based on current filetype
 	local ft = vim.bo.filetype
-	if ft == "c" then
-		return {
-			cmd = "man",
-			args = "-S3",
-			has_selection = false,
-		}
+
+	-- Return the appropriate command configuration based on filetype
+	if M.config.filetype_commands[ft] then
+		return M.config.filetype_commands[ft]
 	else
-		return {
-			cmd = "cppman",
-			args = "",
-			has_selection = true,
-		}
+		return M.config.filetype_commands.default
 	end
 end
+
 -- Window and geometry calculations
 local function calculate_window_size_and_position(content_lines, max_width, max_height, min_height)
 	local ui = vim.api.nvim_list_uis()[1] or { width = vim.o.columns, height = vim.o.lines }
