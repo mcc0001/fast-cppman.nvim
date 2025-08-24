@@ -264,7 +264,7 @@ local function execute_man_sync(selection, columns)
 		return state.cache[cache_key]
 	end
 
-	local cmd = "COLUMNS=" .. tostring(columns) .. " man -S3 '" .. selection:gsub("'", "'\\''") .. "' 2>&1"
+	local cmd = "MANWIDTH=" .. tostring(columns) .. " man -S3 '" .. selection:gsub("'", "'\\''") .. "' 2>&1"
 	local result = vim.fn.system(cmd)
 	local exit_code = vim.v.shell_error
 
@@ -337,7 +337,7 @@ local function execute_man_async(selection, columns, callback)
 		return
 	end
 
-	local cmd = "COLUMNS=" .. tostring(columns) .. " man -S3 '" .. selection:gsub("'", "'\\''") .. "' 2>&1"
+	local cmd = "MANWIDTH=" .. tostring(columns) .. " man -S3 '" .. selection:gsub("'", "'\\''") .. "' 2>&1"
 
 	local stdout = uv.new_pipe(false)
 	local stderr = uv.new_pipe(false)
