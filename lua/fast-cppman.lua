@@ -118,6 +118,10 @@ local function get_command_info()
 	end
 end
 
+local function get_command_args(command_info)
+	return command_info.args and command_info.args ~= "" and command_info.args or ""
+end
+
 -- Window and geometry calculations
 local function calculate_window_size_and_position(content_lines, max_width, max_height, min_height)
 	local ui = vim.api.nvim_list_uis()[1] or { width = vim.o.columns, height = vim.o.lines }
@@ -264,7 +268,8 @@ local function execute_man_sync(selection, columns)
 		return state.cache[cache_key]
 	end
 
-	local cmd = "MANWIDTH=" .. tostring(columns) .. " man -S3 '" .. selection:gsub("'", "'\\''") .. "' 2>&1"
+	local args = get_command_args(get_command_info())
+	local cmd = "MANWIDTH=" .. tostring(columns) .. " man " .. args .. " '" .. selection:gsub("'", "'\\''") .. "' 2>&1"
 	local result = vim.fn.system(cmd)
 	local exit_code = vim.v.shell_error
 
@@ -290,7 +295,8 @@ local function execute_cppman_sync(selection, selection_number, columns)
 		return state.cache[cache_key]
 	end
 
-	local cmd = "COLUMNS=" .. tostring(columns) .. " cppman"
+	local args = get_command_args(get_command_info())
+	local cmd = "COLUMNS=" .. tostring(columns) .. " cppman" .. " " .. args
 
 	if columns then
 		cmd = cmd .. " --force-columns=" .. columns
@@ -337,7 +343,9 @@ local function execute_man_async(selection, columns, callback)
 		return
 	end
 
-	local cmd = "MANWIDTH=" .. tostring(columns) .. " man -S3 '" .. selection:gsub("'", "'\\''") .. "' 2>&1"
+	local args = get_command_args(get_command_info())
+
+	local cmd = "MANWIDTH=" .. tostring(columns) .. " man " .. args .. " '" .. selection:gsub("'", "'\\''") .. "' 2>&1"
 
 	local stdout = uv.new_pipe(false)
 	local stderr = uv.new_pipe(false)
@@ -435,7 +443,8 @@ local function execute_cppman_async(selection, selection_number, columns, callba
 		return
 	end
 
-	local cmd = "COLUMNS=" .. tostring(columns) .. " cppman"
+	local args = get_command_args(get_command_info())
+	local cmd = "COLUMNS=" .. tostring(columns) .. " cppman" .. args
 	if columns then
 		cmd = cmd .. " --force-columns=" .. columns
 	end
