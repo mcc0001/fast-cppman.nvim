@@ -20,8 +20,8 @@ M.config = {
 	filetype_commands = {
 		-- For C files, use man with section 3
 		c = {
-			cmd = "cppman",
-			args = "",
+			cmd = "man",
+			args = "-S3",
 			has_selection = true,
 		},
 		-- For C++ files, use cppman
