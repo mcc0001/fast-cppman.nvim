@@ -34,6 +34,7 @@ local state = {
 		row = 0,
 		col = 0,
 	},
+	current_command_info = nil,
 }
 
 -- Utility functions
@@ -75,9 +76,32 @@ end
 
 local function generate_buffer_name(selection)
 	state.buffer_counter = state.buffer_counter + 1
-	return string.format("cppman:%s:%d", selection, state.buffer_counter)
+	return string.format("manpage:%s:%d", selection, state.buffer_counter)
 end
 
+-- Get command info based on filetype
+local function get_command_info()
+	-- Use stored command info if available (for navigation)
+	if state.current_command_info then
+		return state.current_command_info
+	end
+
+	-- Otherwise determine based on current filetype
+	local ft = vim.bo.filetype
+	if ft == "c" then
+		return {
+			cmd = "man",
+			args = "-S3",
+			has_selection = false,
+		}
+	else
+		return {
+			cmd = "cppman",
+			args = "",
+			has_selection = true,
+		}
+	end
+end
 -- Window and geometry calculations
 local function calculate_window_size_and_position(content_lines, max_width, max_height, min_height)
 	local ui = vim.api.nvim_list_uis()[1] or { width = vim.o.columns, height = vim.o.lines }
@@ -192,7 +216,7 @@ local function get_win_opts(geometry, opts)
 	return vim.tbl_extend("force", base_opts, opts)
 end
 
--- Cppman execution functions
+-- Command execution functions
 local function process_cppman_output(output)
 	local lines = vim.split(output, "\n", { trimempty = true })
 	local filtered_lines = {}
@@ -211,6 +235,37 @@ local function process_cppman_output(output)
 	end
 
 	return filtered_lines
+end
+
+local function process_man_output(output)
+	local lines = vim.split(output, "\n", { trimempty = true })
+	return lines
+end
+
+local function execute_man_sync(selection, columns)
+	local cache_key = generate_cache_key(selection, nil, columns)
+	if state.cache[cache_key] then
+		return state.cache[cache_key]
+	end
+
+	local cmd = "COLUMNS=" .. tostring(columns) .. " man -S3 '" .. selection:gsub("'", "'\\''") .. "' 2>&1"
+	local result = vim.fn.system(cmd)
+	local exit_code = vim.v.shell_error
+
+	if exit_code ~= 0 then
+		if result:find("No manual entry for") then
+			return { "No manual entry for: " .. selection }
+		end
+		return { "Error running man (exit code: " .. exit_code .. ")", "Command: " .. cmd }
+	end
+
+	local filtered_lines = process_man_output(result)
+
+	if #filtered_lines > 0 then
+		state.cache[cache_key] = filtered_lines
+	end
+
+	return #filtered_lines > 0 and filtered_lines or { "No output from man" }
 end
 
 local function execute_cppman_sync(selection, selection_number, columns)
@@ -244,6 +299,104 @@ local function execute_cppman_sync(selection, selection_number, columns)
 	end
 
 	return #filtered_lines > 0 and filtered_lines or { "No output from cppman" }
+end
+
+local function execute_man_async(selection, columns, callback)
+	local cache_key = generate_cache_key(selection, nil, columns)
+	if state.cache[cache_key] then
+		vim.schedule(function()
+			callback(state.cache[cache_key])
+		end)
+		return
+	end
+
+	-- Check if we've reached the max async jobs limit
+	if #state.async_jobs >= M.config.max_async_jobs then
+		table.insert(state.async_queue, {
+			selection = selection,
+			selection_number = nil,
+			columns = columns,
+			callback = callback,
+		})
+		return
+	end
+
+	local cmd = "COLUMNS=" .. tostring(columns) .. " man -S3 '" .. selection:gsub("'", "'\\''") .. "' 2>&1"
+
+	local stdout = uv.new_pipe(false)
+	local stderr = uv.new_pipe(false)
+	local handle, pid
+	local output = {}
+
+	local function on_exit(code)
+		-- Remove this job from active jobs
+		for i, job in ipairs(state.async_jobs) do
+			if job.pid == pid then
+				table.remove(state.async_jobs, i)
+				break
+			end
+		end
+
+		-- Process next job in queue if any
+		if #state.async_queue > 0 then
+			local next_job = table.remove(state.async_queue, 1)
+			execute_command(next_job.selection, next_job.selection_number, next_job.columns, next_job.callback)
+		end
+
+		if code ~= 0 then
+			vim.schedule(function()
+				callback({ "Error running man (exit code: " .. code .. ")", "Command: " .. cmd })
+			end)
+			return
+		end
+
+		local full_output = table.concat(output, "")
+		local filtered_lines = process_man_output(full_output)
+
+		if #filtered_lines > 0 then
+			state.cache[cache_key] = filtered_lines
+		end
+
+		vim.schedule(function()
+			callback(#filtered_lines > 0 and filtered_lines or { "No output from man" })
+		end)
+	end
+
+	local function on_read(err, data)
+		if err then
+			return
+		end
+		if data then
+			table.insert(output, data)
+		end
+	end
+
+	handle, pid = uv.spawn("sh", {
+		args = { "-c", cmd },
+		stdio = { nil, stdout, stderr },
+	}, function(code, signal)
+		stdout:read_stop()
+		stderr:read_stop()
+		stdout:close()
+		stderr:close()
+		if handle then
+			handle:close()
+		end
+		on_exit(code)
+	end)
+
+	if not handle then
+		vim.schedule(function()
+			callback({ "Failed to start man process" })
+		end)
+		return
+	end
+
+	-- Add to active jobs
+	table.insert(state.async_jobs, { handle = handle, pid = pid })
+
+	uv.read_start(stdout, on_read)
+	uv.read_start(stderr, on_read)
 end
 
 local function execute_cppman_async(selection, selection_number, columns, callback)
@@ -293,7 +446,7 @@ local function execute_cppman_async(selection, selection_number, columns, callba
 		-- Process next job in queue if any
 		if #state.async_queue > 0 then
 			local next_job = table.remove(state.async_queue, 1)
-			execute_cppman_async(next_job.selection, next_job.selection_number, next_job.columns, next_job.callback)
+			execute_command(next_job.selection, next_job.selection_number, next_job.columns, next_job.callback)
 		end
 
 		if code ~= 0 then
@@ -352,22 +505,48 @@ local function execute_cppman_async(selection, selection_number, columns, callba
 	uv.read_start(stderr, on_read)
 end
 
-local function execute_cppman(selection, selection_number, columns, callback)
-	if M.config.enable_async and callback then
-		execute_cppman_async(selection, selection_number, columns, callback)
-	else
-		local result = execute_cppman_sync(selection, selection_number, columns)
-		if callback then
-			vim.schedule(function()
-				callback(result)
-			end)
+local function execute_command(selection, selection_number, columns, callback)
+	local command_info = get_command_info()
+
+	if command_info.cmd == "man" then
+		-- man doesn't support selection numbers
+		if M.config.enable_async and callback then
+			execute_man_async(selection, columns, callback)
+		else
+			local result = execute_man_sync(selection, columns)
+			if callback then
+				vim.schedule(function()
+					callback(result)
+				end)
+			end
+			return result
 		end
-		return result
+	else
+		-- cppman with selection support
+		if M.config.enable_async and callback then
+			execute_cppman_async(selection, selection_number, columns, callback)
+		else
+			local result = execute_cppman_sync(selection, selection_number, columns)
+			if callback then
+				vim.schedule(function()
+					callback(result)
+				end)
+			end
+			return result
+		end
 	end
 end
 
 -- Option parsing and prefetching
-local function parse_cppman_options(word_to_search)
+local function parse_options(word_to_search)
+	local command_info = get_command_info()
+
+	if command_info.cmd == "man" then
+		-- man doesn't have selection options
+		return {}
+	end
+
+	-- cppman option parsing
 	local cache_key = "options_" .. word_to_search
 	if state.cache[cache_key] then
 		return state.cache[cache_key]
@@ -439,7 +618,7 @@ local function pop_from_history(stack)
 end
 
 -- Window and buffer creation
-local function create_cppman_buffer(selection, selection_number)
+local function create_manpage_buffer(selection, selection_number)
 	local max_width = math.min(M.config.max_width, vim.o.columns)
 	local max_height = math.min(M.config.max_height, vim.o.lines)
 	local min_height = M.config.min_height
@@ -460,7 +639,7 @@ local function create_cppman_buffer(selection, selection_number)
 	vim.bo[buf].modifiable = true
 
 	-- Create temporary window with minimal size to get proper positioning
-	local temp_lines = cached_content or { "Loading cppman content..." }
+	local temp_lines = cached_content or { "Loading content..." }
 	local temp_geometry = calculate_window_size_and_position(temp_lines, max_width, max_height, min_height)
 
 	local win = vim.api.nvim_open_win(buf, true, get_win_opts(temp_geometry))
@@ -476,7 +655,7 @@ local function create_cppman_buffer(selection, selection_number)
 		vim.api.nvim_buf_set_lines(buf, 0, -1, false, cached_content)
 		vim.bo[buf].modifiable = false
 		vim.bo[buf].readonly = true
-		vim.bo[buf].filetype = "c"
+		vim.bo[buf].filetype = get_command_info().cmd == "man" and "man" or "c"
 
 		-- Resize window to fit content
 		local geometry = calculate_window_size_and_position(cached_content, max_width, max_height, min_height)
@@ -489,14 +668,16 @@ local function create_cppman_buffer(selection, selection_number)
 		})
 	else
 		-- Set loading message and fetch content asynchronously
-		vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "Loading cppman content..." })
+		vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "Loading content..." })
 
-		execute_cppman(selection, selection_number, optimal_columns, function(lines)
+		execute_command(selection, selection_number, optimal_columns, function(lines)
 			if not vim.api.nvim_buf_is_valid(buf) or not vim.api.nvim_win_is_valid(win) then
 				return
 			end
 
-			if #lines == 0 or (lines[1] and lines[1]:find("No output from cppman")) then
+			if
+				#lines == 0 or (lines[1] and (lines[1]:find("No output from") or lines[1]:find("No manual entry for")))
+			then
 				if selection_number then
 					local fallback_cache_key = generate_cache_key(selection, nil, optimal_columns)
 					if state.cache[fallback_cache_key] then
@@ -504,7 +685,7 @@ local function create_cppman_buffer(selection, selection_number)
 					end
 				end
 
-				if #lines == 0 then
+				if #lines == 0 or (lines[1] and lines[1]:find("No manual entry for")) then
 					lines = { "No content available", "Press C-o to go back" }
 				end
 			end
@@ -512,7 +693,7 @@ local function create_cppman_buffer(selection, selection_number)
 			vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
 			vim.bo[buf].modifiable = false
 			vim.bo[buf].readonly = true
-			vim.bo[buf].filetype = "c"
+			vim.bo[buf].filetype = get_command_info().cmd == "man" and "man" or "c"
 
 			-- Resize and reposition window based on content
 			local geometry = calculate_window_size_and_position(lines, max_width, max_height, min_height)
@@ -540,7 +721,7 @@ local function create_cppman_buffer(selection, selection_number)
 			state.current_selection_number = nil
 			safe_win_close(win)
 			safe_close(buf)
-			U.search_cppman(word)
+			U.search_manpage(word)
 		end
 	end
 
@@ -569,9 +750,9 @@ local function create_cppman_buffer(selection, selection_number)
 			state.current_selection_number = prev.selection_number
 
 			if prev.selection_number then
-				create_cppman_buffer(prev.page, prev.selection_number)
+				create_manpage_buffer(prev.page, prev.selection_number)
 			else
-				U.search_cppman(prev.page)
+				U.search_manpage(prev.page)
 			end
 		else
 			vim.notify("No previous page to go back to", vim.log.levels.INFO)
@@ -588,9 +769,9 @@ local function create_cppman_buffer(selection, selection_number)
 			state.current_selection_number = next_item.selection_number
 
 			if next_item.selection_number then
-				create_cppman_buffer(next_item.page, next_item.selection_number)
+				create_manpage_buffer(next_item.page, next_item.selection_number)
 			else
-				U.search_cppman(next_item.page)
+				U.search_manpage(next_item.page)
 			end
 		else
 			vim.notify("No forward page available", vim.log.levels.INFO)
@@ -687,15 +868,15 @@ local function show_selection_window(word_to_search, options)
 				-- Use cached content immediately
 				vim.api.nvim_win_close(win, true)
 				safe_close(buf)
-				create_cppman_buffer(word_to_search, selection_num)
+				create_manpage_buffer(word_to_search, selection_num)
 			else
 				-- Show loading message and fetch content
 				update_option_status(selection_num, "🔄")
-				execute_cppman(word_to_search, selection_num, optimal_columns, function(content)
+				execute_command(word_to_search, selection_num, optimal_columns, function(content)
 					if vim.api.nvim_buf_is_valid(buf) and vim.api.nvim_win_is_valid(win) then
 						vim.api.nvim_win_close(win, true)
 						safe_close(buf)
-						create_cppman_buffer(word_to_search, selection_num)
+						create_manpage_buffer(word_to_search, selection_num)
 					end
 				end)
 			end
@@ -731,9 +912,9 @@ local function show_selection_window(word_to_search, options)
 			state.current_selection_number = item.selection_number
 
 			if item.selection_number then
-				create_cppman_buffer(item.page, item.selection_number)
+				create_manpage_buffer(item.page, item.selection_number)
 			else
-				U.search_cppman(item.page)
+				U.search_manpage(item.page)
 			end
 		else
 			vim.notify("No page available in that direction", vim.log.levels.INFO)
@@ -825,8 +1006,9 @@ local function create_input_window()
 		}
 	end
 
+	local command_info = get_command_info()
 	local win_opts = get_win_opts(geometry, {
-		title = "Search cppman",
+		title = "Search " .. command_info.cmd,
 		title_pos = "center",
 	})
 
@@ -841,7 +1023,7 @@ local function create_input_window()
 		if value and #value > 0 then
 			vim.api.nvim_win_close(input_win, true)
 			safe_close(buf)
-			M.open_cppman_for(value)
+			M.open_manpage_for(value)
 		else
 			vim.api.nvim_win_close(input_win, true)
 			safe_close(buf)
@@ -879,7 +1061,7 @@ M.setup = function(opts)
 	M.config = vim.tbl_deep_extend("force", M.config, opts)
 	vim.api.nvim_create_user_command("Fastcppman", function(args)
 		if args.args and #args.args > 1 then
-			M.open_cppman_for(args.args)
+			M.open_manpage_for(args.args)
 		else
 			M.input()
 		end
@@ -890,21 +1072,21 @@ M.input = function()
 	create_input_window()
 end
 
-U.search_cppman = function(word_to_search)
-	-- Parse options synchronously
-	local options = parse_cppman_options(word_to_search)
-	-- number
+U.search_manpage = function(word_to_search)
+	-- Parse options
+	local options = parse_options(word_to_search)
+
 	if type(options) == "number" and options == -1 then
 		cleanup()
 		-- Only fall back to LSP if configured to do so
 		if M.config.fallback_to_lsp_hover then
 			vim.lsp.buf.hover()
 		else
-			vim.notify("No cppman entry found for: " .. word_to_search, vim.log.levels.ERROR)
+			vim.notify("No entry found for: " .. word_to_search, vim.log.levels.ERROR)
 		end
-	-- table
 	elseif #options == 0 then
-		create_cppman_buffer(word_to_search)
+		-- For man or when no options are available
+		create_manpage_buffer(word_to_search)
 		state.current_page = word_to_search
 		state.current_selection_number = nil
 	else
@@ -912,14 +1094,14 @@ U.search_cppman = function(word_to_search)
 		if M.config.auto_select_first_match then
 			-- Automatically select the first option
 			state.current_selection_number = options[1].num
-			create_cppman_buffer(word_to_search, options[1].num)
+			create_manpage_buffer(word_to_search, options[1].num)
 		else
 			show_selection_window(word_to_search, options)
 		end
 	end
 end
 
-M.open_cppman_for = function(word_to_search)
+M.open_manpage_for = function(word_to_search)
 	cleanup()
 
 	-- Clear navigation history when starting a new search
@@ -935,7 +1117,11 @@ M.open_cppman_for = function(word_to_search)
 		col = screen_pos.col - 1,
 	}
 
-	U.search_cppman(word_to_search)
+	-- Get command info BEFORE opening any windows
+	local command_info = get_command_info()
+	state.current_command_info = command_info
+
+	U.search_manpage(word_to_search)
 end
 
 return M
