@@ -22,7 +22,7 @@ M.config = {
 		c = {
 			cmd = "man",
 			args = "-S3",
-			has_selection = true,
+			has_selection = false,
 		},
 		-- For C++ files, use cppman
 		cpp = {
@@ -671,7 +671,7 @@ local function create_manpage_buffer(selection, selection_number)
 		vim.api.nvim_buf_set_lines(buf, 0, -1, false, cached_content)
 		vim.bo[buf].modifiable = false
 		vim.bo[buf].readonly = true
-		vim.bo[buf].filetype = get_command_info().cmd == "man" and "man" or "c"
+		vim.bo[buf].filetype = get_command_info().cmd == "man" and "c" or "cpp"
 
 		-- Resize window to fit content
 		local geometry = calculate_window_size_and_position(cached_content, max_width, max_height, min_height)
@@ -709,7 +709,7 @@ local function create_manpage_buffer(selection, selection_number)
 			vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
 			vim.bo[buf].modifiable = false
 			vim.bo[buf].readonly = true
-			vim.bo[buf].filetype = get_command_info().cmd == "man" and "man" or "c"
+			vim.bo[buf].filetype = get_command_info().cmd == "man" and "c" or "cpp"
 
 			-- Resize and reposition window based on content
 			local geometry = calculate_window_size_and_position(lines, max_width, max_height, min_height)
