@@ -294,10 +294,6 @@ local function execute_cppman_sync(selection, selection_number, columns)
 
 	local args = get_command_args(get_command_info())
 	local cmd = "COLUMNS=" .. tostring(columns) .. " cppman" .. " " .. args
-
-	if columns then
-		cmd = cmd .. " --force-columns=" .. columns
-	end
 	cmd = cmd .. " '" .. selection:gsub("'", "'\\''") .. "' 2>&1"
 
 	if selection_number then
@@ -442,9 +438,6 @@ local function execute_cppman_async(selection, selection_number, columns, callba
 
 	local args = get_command_args(get_command_info())
 	local cmd = "COLUMNS=" .. tostring(columns) .. " cppman" .. args
-	if columns then
-		cmd = cmd .. " --force-columns=" .. columns
-	end
 	cmd = cmd .. " '" .. selection:gsub("'", "'\\''") .. "' 2>&1"
 
 	if selection_number then
