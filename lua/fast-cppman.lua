@@ -470,15 +470,16 @@ local function execute_command_sync(adapter_info, selection, selection_number, c
 	local result = vim.fn.system(cmd)
 	local exit_code = vim.v.shell_error
 
-	-- Check for errors
-	if exit_code ~= 0 and adapter_info.exit_code_error then
-		return { "Error running " .. adapter_info.cmd .. " (exit code: " .. exit_code .. ")", "Command: " .. cmd }
-	end
+	-- -- Check for errors
+	-- if exit_code ~= 0 and adapter_info.exit_code_error then
+	-- 	return { "Error running " .. adapter_info.cmd .. " (exit code: " .. exit_code .. ")", "Command: " .. cmd }
+	-- end
 
 	-- Check for error patterns in output
 	for _, pattern in ipairs(adapter_info.error_patterns) do
 		if result:find(pattern) then
-			return { "Error: " .. pattern }
+			-- return { "Error: " .. pattern }
+			return { pattern }
 		end
 	end
 
@@ -949,8 +950,8 @@ local function show_selection_window(word_to_search, options)
 
 	vim.bo[buf].syntax = "off"
 	for i = 1, #options do
-		vim.highlight.range(buf, -1, "Number", { i - 1, 2 }, { i - 1, 4 }, 0, {})
-		vim.highlight.range(buf, -1, "Identifier", { i - 1, 6 }, { i - 1, -1 }, 0, {})
+		vim.api.nvim_buf_add_highlight(buf, -1, "Number", i - 1, 2, 4)
+		vim.api.nvim_buf_add_highlight(buf, -1, "Identifier", i - 1, 6, -1)
 	end
 	vim.wo[win].cursorline = true
 	vim.wo[win].cursorlineopt = "line"
