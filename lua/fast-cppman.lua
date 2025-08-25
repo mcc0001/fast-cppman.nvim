@@ -747,15 +747,32 @@ local function create_docpage_buffer(selection, selection_number)
 	local function navigate_to_word()
 		local word = vim.fn.expand("<cword>")
 		if word and word ~= "" then
+			-- Store current state for potential rollback
+			local current_page = state.current_page
+			local current_selection_number = state.current_selection_number
+
 			if state.current_page then
 				push_to_history(state.stack, state.current_page, state.current_selection_number)
 				state.forward_stack = {}
 			end
+
 			state.current_page = word
 			state.current_selection_number = nil
-			safe_win_close(win)
-			safe_close(buf)
-			U.search_docpage(word)
+
+			-- Check if the new word exists before closing current window
+			local options = parse_options(word)
+			if type(options) == "number" and options == -1 then
+				-- Word not found, revert state changes and show error
+				state.current_page = current_page
+				state.current_selection_number = current_selection_number
+				pop_from_history(state.stack) -- Remove the invalid history entry
+				vim.notify("No entry found for: " .. word, vim.log.levels.ERROR)
+			else
+				-- Word found, proceed with navigation
+				safe_win_close(win)
+				safe_close(buf)
+				U.search_docpage(word)
+			end
 		end
 	end
 
