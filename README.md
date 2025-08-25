@@ -1,6 +1,19 @@
  # fast-cppman.nvim
- A NeoVim plugin with a simple interface for the [cppman](https://github.com/ryanmjacobs/cppman) CLI tool,inspiring and fork from [cppman.nvim](https://github.com/madskjeldgaard/cppman.nvim)
-] allowing you to easily search cplusplus.com and cppreference.com without ever leaving neovim.
+A NeoVim plugin that provides a fast, asynchronous interface for viewing C/C++ documentation using **cppman** and **man** pages, with intelligent caching and navigation features.
+
+ ## Features
+- **Asynchronous Execution**: Non-blocking UI with configurable concurrent job limits
+- **Intelligent Caching**: Automatic caching of results for faster subsequent lookups
+- **Prefetching**: Pre-loads top N options when multiple matches are found
+- **Navigation History**: Full back/forward navigation with unified history mode
+- **Flexible Window Positioning**: Choose between cursor-relative or centered positioning
+- **Adaptive Window Sizing**: Windows automatically resize based on content and screen space
+- **Fallback Support**: Configurable fallback to `LSP hover` when documentation isn't available
+- **Syntax Highlighting**: Proper syntax highlighting for documentation
+- **Interactive Selection**: Visual selection interface for multiple matches
+- **Search Input**: Popup input for manual searches
+- **Word Navigation**: Follow links within documentation with simple keybindings
+- **Multi-Adapter Support**: Supports both `man` and `cppman` with filetype-specific configurations
 ## Screenshots
 
 ### Multiple match selection
@@ -17,19 +30,7 @@
 ![Search Input](./screenshots/input.png)
 
 ---
- ## Features
-- Asynchronous Execution: Non-blocking UI with configurable concurrent job limits
-- Intelligent Caching: Automatic caching of results for faster subsequent lookups
-- Prefetching: Pre-loads top N options when multiple matches are found
-- Navigation History: Full back/forward navigation with unified or per-page history modes
-- Flexible Window Positioning: Choose between cursor-relative or centered positioning
-- Adaptive Window Sizing: Windows automatically resize based on content and screen space
-- Fallback Support: Configurable fallback to LSP hover when cppman results aren't available
-- Syntax Highlighting: Proper syntax highlighting for C++ documentation
-- Interactive Selection: Visual selection interface for multiple matches
-- Search Input: Popup input for manual searches
-- Word Navigation: Follow links within documentation with simple keybindings
-- Buffer Management: Unique buffer naming and proper cleanup
+
 ## Installation
  Install using your favorite package manager. For example,
 ##  with [LazyVim](https://www.lazyvim.org/configuration/lazy.nvim):
@@ -37,25 +38,52 @@
 return {
   "mcc0001/fast-cppman.nvim",
   ft = { "c", "cpp" },
-
   opts = {
-    max_prefetch_options = 20,      -- Prefetch top N options when multiple matches found
-    max_width = 80,                 -- Maximum width of cppman window
-    max_height = 20,                -- Maximum height of cppman window
-    min_height = 5,                 -- Minimum height of cppman window
-    input_width = 20,               -- Width of input popup
-    enable_async = true,            -- Enable async operations
-    max_async_jobs = 5,             -- Maximum concurrent async jobs
-    history_mode = "unified",       -- "unified" or "manpage" navigation history
-    position = "cursor",            -- "cursor" or "center" window placement
-    fallback_to_lsp_hover = true,   -- Fall back to LSP hover when no cppman results
-    auto_select_first_match = false -- True: never show up selections and choosing the first match
+    max_prefetch_options = 20, -- Prefetch top N options when multiple matches found
+    max_width = 200, -- Maximum width of documentation window
+    max_height = 20, -- Maximum height of documentation window
+    min_height = 5, -- Minimum height of documentation window
+    input_width = 20, -- Width of input popup
+    enable_async = true, -- Enable async operations
+    max_async_jobs = 5, -- Maximum concurrent async jobs
+    history_mode = "unified", -- Navigation history mode
+    position = "cursor", -- "cursor" or "center" window placement
+    auto_select_first_match = false, -- Auto-select first match in selections
+
+    -- Adapter configurations
+    adapters = {
+      man = {
+        cmd = "man",
+        args = "-S3",
+        env = { MANWIDTH = "COLUMNS" },
+        error_patterns = { "No manual entry for" },
+        exit_code_error = false,
+        fallback_to_lsp = true,
+        supports_selections = false,
+      },
+      cppman = {
+        cmd = "cppman",
+        args = "",
+        env = { COLUMNS = "COLUMNS" },
+        error_patterns = { "nothing appropriate" },
+        exit_code_error = false,
+        fallback_to_lsp = true,
+        supports_selections = true,
+      },
+    },
+
+    -- Filetype-specific adapter configurations
+    filetype_adapters = {
+      c = { adapter = "man" },
+      cpp = { adapter = "cppman" },
+      default = { adapter = "cppman" },
+    },
   },
   keys = {
     {
       "<leader>cp",
       function()
-        require("fast-cppman").open_cppman_for(vim.fn.expand("<cword>"))
+        require("fast-cppman").open_docpage_for(vim.fn.expand("<cword>"))
       end,
       desc = "Search current function from cppman",
     },
@@ -64,7 +92,7 @@ return {
       function()
         require("fast-cppman").input()
       end,
-      desc = "open cppman search box",
+      desc = "Open cppman search box",
     },
   },
 }
@@ -73,18 +101,47 @@ return {
  You can setup the plugin with the following code:
  ```lua
  require("fast-cppman").setup({
-  max_prefetch_options = 20,      -- Prefetch top N options when multiple matches found
-  max_width = 80,                 -- Maximum width of cppman window
-  max_height = 20,                -- Maximum height of cppman window
-  min_height = 5,                 -- Minimum height of cppman window
-  input_width = 20,               -- Width of input popup
-  enable_async = true,            -- Enable async operations
-  max_async_jobs = 5,             -- Maximum concurrent async jobs
-  history_mode = "unified",       -- "unified" or "manpage" navigation history
-  position = "cursor",            -- "cursor" or "center" window placement
-  fallback_to_lsp_hover = true,   -- Fall back to LSP hover when no cppman results
-  auto_select_first_match = false -- True: never show up selections and choosing the first match
- })
+    max_prefetch_options = 20, -- Prefetch top N options when multiple matches found
+    max_width = 200, -- Maximum width of documentation window
+    max_height = 20, -- Maximum height of documentation window
+    min_height = 5, -- Minimum height of documentation window
+    input_width = 20, -- Width of input popup
+    enable_async = true, -- Enable async operations
+    max_async_jobs = 5, -- Maximum concurrent async jobs
+    history_mode = "unified", -- Navigation history mode
+    position = "cursor", -- "cursor" or "center" window placement
+    auto_select_first_match = false, -- Auto-select first match in selections
+
+    -- Adapter configurations
+    adapters = {
+      man = {
+        cmd = "man",
+        args = "-S3",
+        env = { MANWIDTH = "COLUMNS" },
+        error_patterns = { "No manual entry for" },
+        exit_code_error = false,
+        fallback_to_lsp = true,
+        supports_selections = false,
+      },
+      cppman = {
+        cmd = "cppman",
+        args = "",
+        env = { COLUMNS = "COLUMNS" },
+        error_patterns = { "nothing appropriate" },
+        exit_code_error = false,
+        fallback_to_lsp = true,
+        supports_selections = true,
+      },
+    },
+
+    -- Filetype-specific adapter configurations
+    filetype_adapters = {
+      c = { adapter = "man" },
+      cpp = { adapter = "cppman" },
+      default = { adapter = "cppman" },
+    },
+  },
+)
  ```
 
 ## Integration with LSP
@@ -123,7 +180,7 @@ This configuration sets up the K key to:
 Make sure to enable the fallback option in your cppman configuration:
 
 ```lua
-require('cppman').setup({
+require('fast-cppman').setup({
   fallback_to_lsp_hover = true, -- Enable LSP fallback
   -- other options...
 })
@@ -139,14 +196,14 @@ You can also call the functions directly:
  -- Open the search input
  cppman.input()
  -- Open cppman for a specific term
- cppman.open_cppman_for("std::vector")
+ cppman.open_docpage_for("std::vector")
  ```
 ## Keymaps
  The user's example configuration sets up two keymaps:
  ```lua
  require("fast-cppman")
  vim.keymap.set("n", "<leader>cp", function()
-   require("fast-cppman").open_cppman_for(vim.fn.expand("<cword>"))
+   require("fast-cppman").open_docpage_for(vim.fn.expand("<cword>"))
  end)
  vim.keymap.set("n", "<leader>cP", function()
    require("fast-cppman").input()
