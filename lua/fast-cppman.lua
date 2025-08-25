@@ -1,5 +1,9 @@
+-- ============================================================================
+--  Core Domain Classes
+-- ============================================================================
+
 ---@class UvHandle
----Lightweight wrapper for libuv handle types
+---Lightweight wrapper for libuv handle types (opaque userdata)
 
 ---@class DocPageConfig
 ---@field max_prefetch_options integer
@@ -50,8 +54,8 @@
 ---@field current_buf integer?
 ---@field current_win integer?
 ---@field cache table<string, string[]>
----@field async_jobs DocPageAsyncJob[]
----@field async_queue DocPageAsyncJob[]
+---@field async_jobs DocPageJobInfo[]
+---@field async_queue DocPageAsyncJobQueue[]
 ---@field buffer_counter integer
 ---@field initial_cursor DocPageCursorPosition
 ---@field current_adapter_info DocPageAdapterInfo?
@@ -60,10 +64,6 @@
 ---@class DocPageHistoryEntry
 ---@field page string
 ---@field selection_number integer?
-
----@class DocPageAsyncJob
----@field handle UvHandle?
----@field pid integer?
 
 ---@class DocPageCursorPosition
 ---@field top integer
@@ -82,6 +82,37 @@
 ---@field fallback_to_lsp boolean
 ---@field supports_selections boolean
 ---@field parse_options? fun(output: string): DocPageOption[]
+
+-- ============================================================================
+--  Utility / Internal Classes
+-- ============================================================================
+
+---@class DocPageJobInfo
+---@field handle UvHandle?
+---@field pid integer?
+
+---@class DocPageAsyncJobQueue
+---@field selection string
+---@field selection_number integer?
+---@field columns integer
+---@field callback fun(result: string[])
+---@field adapter_info DocPageAdapterInfo
+
+---@class DocPageInputWindow
+---@field unmount fun()
+
+-- ============================================================================
+--  Module Shapes
+-- ============================================================================
+
+---@class DocPageModule
+---@field config DocPageConfig
+---@field setup fun(opts?: DocPageConfig)
+---@field input fun()
+---@field open_docpage_for fun(word_to_search: string)
+
+---@class DocPageUtils
+---@field search_docpage fun(word_to_search: string)
 
 local uv = vim.uv
 
