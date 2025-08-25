@@ -170,7 +170,7 @@ M.config = {
 
 				return filtered_lines
 			end,
-			error_patterns = { "error:" },
+			error_patterns = { "nothing appropriate" },
 			exit_code_error = true,
 			fallback_to_lsp = true,
 			supports_selections = true,
