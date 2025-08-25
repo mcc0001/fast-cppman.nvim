@@ -1,9 +1,95 @@
-local uv = vim.loop
+---@class UvHandle
+---Lightweight wrapper for libuv handle types
+
+---@class DocPageConfig
+---@field max_prefetch_options integer
+---@field max_width integer
+---@field max_height integer
+---@field min_height integer
+---@field input_width integer
+---@field enable_async boolean
+---@field max_async_jobs integer
+---@field history_mode "unified"|"separate"
+---@field position "cursor"|"center"
+---@field auto_select_first_match boolean
+---@field adapters table<string, DocPageAdapterConfig>
+---@field filetype_adapters table<string, DocPageFileTypeAdapterConfig>
+
+---@class DocPageAdapterConfig
+---@field cmd string
+---@field args string
+---@field env table<string, string>
+---@field process_output fun(output: string): string[]
+---@field error_patterns string[]
+---@field exit_code_error boolean
+---@field fallback_to_lsp boolean
+---@field supports_selections boolean
+---@field parse_options? fun(output: string): DocPageOption[]
+
+---@class DocPageFileTypeAdapterConfig
+---@field adapter string
+---@field args string
+
+---@class DocPageOption
+---@field num integer
+---@field text string
+---@field value string
+
+---@class DocPageGeometry
+---@field row number
+---@field col number
+---@field width number
+---@field height number
+---@field total_width number
+---@field total_height number
+
+---@class DocPageState
+---@field stack DocPageHistoryEntry[]
+---@field forward_stack DocPageHistoryEntry[]
+---@field current_page string?
+---@field current_buf integer?
+---@field current_win integer?
+---@field cache table<string, string[]>
+---@field async_jobs DocPageAsyncJob[]
+---@field async_queue DocPageAsyncJob[]
+---@field buffer_counter integer
+---@field initial_cursor DocPageCursorPosition
+---@field current_adapter_info DocPageAdapterInfo?
+---@field current_selection_number integer?
+
+---@class DocPageHistoryEntry
+---@field page string
+---@field selection_number integer?
+
+---@class DocPageAsyncJob
+---@field handle UvHandle?
+---@field pid integer?
+
+---@class DocPageCursorPosition
+---@field top integer
+---@field left integer
+---@field row integer
+---@field col integer
+
+---@class DocPageAdapterInfo
+---@field name string
+---@field cmd string
+---@field args string
+---@field env table<string, string>
+---@field process_output fun(output: string): string[]
+---@field error_patterns string[]
+---@field exit_code_error boolean
+---@field fallback_to_lsp boolean
+---@field supports_selections boolean
+---@field parse_options? fun(output: string): DocPageOption[]
+
+local uv = vim.uv
 
 local M = {}
 local U = {}
 
 -- Default configuration
+---@type DocPageConfig
 M.config = {
 	max_prefetch_options = 20,
 	max_width = 80,
@@ -82,6 +168,7 @@ M.config = {
 	},
 }
 
+---@type DocPageState
 local state = {
 	stack = {},
 	forward_stack = {},
@@ -99,15 +186,18 @@ local state = {
 		col = 0,
 	},
 	current_adapter_info = nil,
+	current_selection_number = nil,
 }
 
 -- Utility functions
+---@param bufnr integer?
 local function safe_close(bufnr)
 	if bufnr and vim.api.nvim_buf_is_valid(bufnr) then
 		pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
 	end
 end
 
+---@param win_id integer?
 local function safe_win_close(win_id)
 	if win_id and vim.api.nvim_win_is_valid(win_id) then
 		pcall(vim.api.nvim_win_close, win_id, true)
@@ -134,16 +224,23 @@ local function clear_navigation()
 	state.current_selection_number = nil
 end
 
+---@param selection string
+---@param selection_number integer?
+---@param columns integer?
+---@return string
 local function generate_cache_key(selection, selection_number, columns)
 	return string.format("%s:%s:%s", selection, selection_number or "0", columns or "0")
 end
 
+---@param selection string
+---@return string
 local function generate_buffer_name(selection)
 	state.buffer_counter = state.buffer_counter + 1
 	return string.format("docpage:%s:%d", selection, state.buffer_counter)
 end
 
 -- Get adapter info based on filetype
+---@return DocPageAdapterInfo
 local function get_adapter_info()
 	-- Use stored adapter info if available (for navigation)
 	if state.current_adapter_info then
@@ -175,6 +272,11 @@ local function get_adapter_info()
 end
 
 -- Window and geometry calculations
+---@param content_lines string[]
+---@param max_width integer
+---@param max_height integer
+---@param min_height integer
+---@return DocPageGeometry
 local function calculate_window_size_and_position(content_lines, max_width, max_height, min_height)
 	local ui = vim.api.nvim_list_uis()[1] or { width = vim.o.columns, height = vim.o.lines }
 
@@ -266,11 +368,16 @@ local function calculate_window_size_and_position(content_lines, max_width, max_
 	end
 end
 
+---@param window_width integer
+---@return integer
 local function calculate_optimal_columns(window_width)
 	return math.max(40, window_width - 8)
 end
 
 -- Reusable window options generator
+---@param geometry DocPageGeometry
+---@param opts? table
+---@return table
 local function get_win_opts(geometry, opts)
 	opts = opts or {}
 	local base_opts = {
@@ -287,6 +394,11 @@ local function get_win_opts(geometry, opts)
 end
 
 -- Command execution functions
+---@param adapter_info DocPageAdapterInfo
+---@param selection string
+---@param selection_number integer?
+---@param columns integer
+---@return string
 local function build_command(adapter_info, selection, selection_number, columns)
 	local cmd = adapter_info.cmd
 	local args = adapter_info.args
@@ -312,6 +424,11 @@ local function build_command(adapter_info, selection, selection_number, columns)
 	return full_cmd
 end
 
+---@param adapter_info DocPageAdapterInfo
+---@param selection string
+---@param selection_number integer?
+---@param columns integer
+---@return string[]
 local function execute_command_sync(adapter_info, selection, selection_number, columns)
 	local cache_key = generate_cache_key(selection, selection_number, columns)
 	if state.cache[cache_key] then
@@ -343,6 +460,11 @@ local function execute_command_sync(adapter_info, selection, selection_number, c
 	return #processed_output > 0 and processed_output or { "No output from " .. adapter_info.cmd }
 end
 
+---@param adapter_info DocPageAdapterInfo
+---@param selection string
+---@param selection_number integer?
+---@param columns integer
+---@param callback fun(result: string[])
 local function execute_command_async(adapter_info, selection, selection_number, columns, callback)
 	local cache_key = generate_cache_key(selection, selection_number, columns)
 	if state.cache[cache_key] then
@@ -459,6 +581,11 @@ local function execute_command_async(adapter_info, selection, selection_number, 
 	uv.read_start(stderr, on_read)
 end
 
+---@param selection string
+---@param selection_number integer?
+---@param columns integer
+---@param callback? fun(result: string[])
+---@return string[]?
 local function execute_command(selection, selection_number, columns, callback)
 	local adapter_info = get_adapter_info()
 
@@ -476,6 +603,8 @@ local function execute_command(selection, selection_number, columns, callback)
 end
 
 -- Option parsing and prefetching
+---@param word_to_search string
+---@return DocPageOption[]|integer
 local function parse_options(word_to_search)
 	local adapter_info = get_adapter_info()
 
@@ -525,6 +654,10 @@ local function parse_options(word_to_search)
 	end
 end
 
+---@param word_to_search string
+---@param options DocPageOption[]
+---@param columns integer
+---@param callback? fun(option_num: integer)
 local function prefetch_top_options(word_to_search, options, columns, callback)
 	if #options == 0 or not M.config.enable_async then
 		return
@@ -550,6 +683,9 @@ local function prefetch_top_options(word_to_search, options, columns, callback)
 end
 
 -- Navigation history management
+---@param stack DocPageHistoryEntry[]
+---@param page string
+---@param selection_number integer?
 local function push_to_history(stack, page, selection_number)
 	table.insert(stack, {
 		page = page,
@@ -557,6 +693,8 @@ local function push_to_history(stack, page, selection_number)
 	})
 end
 
+---@param stack DocPageHistoryEntry[]
+---@return DocPageHistoryEntry?
 local function pop_from_history(stack)
 	if #stack > 0 then
 		return table.remove(stack)
@@ -565,6 +703,8 @@ local function pop_from_history(stack)
 end
 
 -- Window and buffer creation
+---@param selection string
+---@param selection_number integer?
 local function create_docpage_buffer(selection, selection_number)
 	local max_width = math.min(M.config.max_width, vim.o.columns)
 	local max_height = math.min(M.config.max_height, vim.o.lines)
@@ -593,11 +733,10 @@ local function create_docpage_buffer(selection, selection_number)
 	local win = vim.api.nvim_open_win(buf, true, get_win_opts(temp_geometry))
 	state.current_win = win
 
-	vim.api.nvim_win_set_option(win, "wrap", true)
-	vim.api.nvim_win_set_option(win, "number", false)
-	vim.api.nvim_win_set_option(win, "relativenumber", false)
-	vim.api.nvim_win_set_option(win, "cursorline", true)
-
+	vim.api.nvim_set_option_value("wrap", true, { win = win })
+	vim.api.nvim_set_option_value("number", false, { win = win })
+	vim.api.nvim_set_option_value("relativenumber", false, { win = win })
+	vim.api.nvim_set_option_value("cursorline", true, { win = win })
 	-- If content is cached, use it immediately
 	if cached_content then
 		vim.api.nvim_buf_set_lines(buf, 0, -1, false, cached_content)
@@ -729,6 +868,8 @@ local function create_docpage_buffer(selection, selection_number)
 	return win, buf
 end
 
+---@param word_to_search string
+---@param options DocPageOption[]
 local function show_selection_window(word_to_search, options)
 	-- Prefetch (async) based on configured limit
 	local max_width = math.min(M.config.max_width, vim.o.columns)
@@ -758,16 +899,25 @@ local function show_selection_window(word_to_search, options)
 	vim.bo[buf].modifiable = false
 	vim.bo[buf].bufhidden = "wipe"
 
-	vim.api.nvim_buf_set_option(buf, "syntax", "off")
+	-- vim.api.nvim_buf_set_option(buf, "syntax", "off")
+	-- for i = 1, #options do
+	-- 	vim.api.nvim_buf_add_highlight(buf, -1, "Number", i - 1, 2, 4)
+	-- 	vim.api.nvim_buf_add_highlight(buf, -1, "Identifier", i - 1, 6, -1)
+	-- end
+	--
+	-- vim.api.nvim_win_set_option(win, "cursorline", true)
+	-- vim.api.nvim_win_set_option(win, "cursorlineopt", "line")
+
+	vim.bo[buf].syntax = "off"
 	for i = 1, #options do
-		vim.api.nvim_buf_add_highlight(buf, -1, "Number", i - 1, 2, 4)
-		vim.api.nvim_buf_add_highlight(buf, -1, "Identifier", i - 1, 6, -1)
+		vim.highlight.range(buf, -1, "Number", { i - 1, 2 }, { i - 1, 4 }, 0, {})
+		vim.highlight.range(buf, -1, "Identifier", { i - 1, 6 }, { i - 1, -1 }, 0, {})
 	end
-
-	vim.api.nvim_win_set_option(win, "cursorline", true)
-	vim.api.nvim_win_set_option(win, "cursorlineopt", "line")
-
+	vim.wo[win].cursorline = true
+	vim.wo[win].cursorlineopt = "line"
 	-- Function to update the status of an option
+	---@param option_num integer
+	---@param status string
 	local function update_option_status(option_num, status)
 		if not vim.api.nvim_buf_is_valid(buf) or not vim.api.nvim_win_is_valid(win) then
 			return
@@ -1018,6 +1168,7 @@ local function create_input_window()
 end
 
 -- Public API
+---@param opts? DocPageConfig
 M.setup = function(opts)
 	-- Merge user configuration with defaults
 	opts = opts or {}
@@ -1035,6 +1186,7 @@ M.input = function()
 	create_input_window()
 end
 
+---@param word_to_search string
 U.search_docpage = function(word_to_search)
 	-- Parse options
 	local options = parse_options(word_to_search)
@@ -1065,6 +1217,7 @@ U.search_docpage = function(word_to_search)
 	end
 end
 
+---@param word_to_search string
 M.open_docpage_for = function(word_to_search)
 	cleanup()
 
@@ -1079,6 +1232,8 @@ M.open_docpage_for = function(word_to_search)
 	state.initial_cursor = {
 		row = screen_pos.row - 1,
 		col = screen_pos.col - 1,
+		top = 0,
+		left = 0,
 	}
 
 	-- Get adapter info BEFORE opening any windows
