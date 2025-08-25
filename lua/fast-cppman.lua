@@ -498,7 +498,7 @@ local function execute_command_async(adapter_info, selection, selection_number, 
 	end
 
 	-- Add to active jobs
-	table.insert(state.async_jobs, { handle = handle, pid = pid })
+	table.insert(state.async_jobs, { handle = handle, pid = pid, word_to_search = selection })
 
 	if stdout then
 		uv.read_start(stdout, on_read)
@@ -814,6 +814,25 @@ local function create_docpage_buffer(selection, selection_number)
 	return win, buf
 end
 
+local function cancel_jobs_for_word(word_to_search)
+	-- Cancel running jobs
+	for i = #state.async_jobs, 1, -1 do
+		local job = state.async_jobs[i]
+		if job.word_to_search == word_to_search then
+			if job.handle and not job.handle:is_closing() then
+				job.handle:close()
+			end
+			table.remove(state.async_jobs, i)
+		end
+	end
+
+	-- Clear queued jobs
+	for i = #state.async_queue, 1, -1 do
+		if state.async_queue[i].selection == word_to_search then
+			table.remove(state.async_queue, i)
+		end
+	end
+end
 ---@param word_to_search string
 ---@param options DocPageOption[]
 local function show_selection_window(word_to_search, options)
@@ -901,6 +920,9 @@ local function show_selection_window(word_to_search, options)
 		local selection_num = tonumber(line:match("%d+"))
 
 		if selection_num and selection_num >= 1 and selection_num <= #options then
+			-- Cancel all existing jobs for this word to prioritize the selection
+			cancel_jobs_for_word(word_to_search)
+
 			if state.current_page and M.config.history_mode == "unified" then
 				push_to_history(state.stack, state.current_page, state.current_selection_number)
 				state.forward_stack = {}
@@ -916,7 +938,17 @@ local function show_selection_window(word_to_search, options)
 			else
 				-- Show loading message and fetch content
 				update_option_status(selection_num, "🔄")
+
+				-- Create a flag to track if we've already handled this selection
+				local handled = false
+
 				execute_command(word_to_search, selection_num, optimal_columns, function(content)
+					-- Ensure we only handle this once
+					if handled then
+						return
+					end
+					handled = true
+
 					-- Check if content contains error
 					local is_error = false
 					local adapter_info = get_adapter_info()
@@ -933,8 +965,12 @@ local function show_selection_window(word_to_search, options)
 						vim.notify("Error: " .. content[1], vim.log.levels.ERROR)
 					else
 						-- Close selection window and show content
-						safe_win_close(win)
-						safe_close(buf)
+						if vim.api.nvim_win_is_valid(win) then
+							safe_win_close(win)
+						end
+						if vim.api.nvim_buf_is_valid(buf) then
+							safe_close(buf)
+						end
 						create_docpage_buffer(word_to_search, selection_num)
 					end
 				end)
@@ -946,7 +982,6 @@ local function show_selection_window(word_to_search, options)
 			vim.notify("Invalid selection", vim.log.levels.ERROR)
 		end
 	end, opts)
-
 	vim.keymap.set("n", "q", function()
 		vim.api.nvim_win_close(win, true)
 		safe_close(buf)
