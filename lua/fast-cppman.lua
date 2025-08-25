@@ -22,19 +22,16 @@ M.config = {
 		c = {
 			cmd = "man",
 			args = "-S3",
-			has_selection = false,
 		},
 		-- For C++ files, use cppman
 		cpp = {
 			cmd = "cppman",
 			args = "",
-			has_selection = true,
 		},
 		-- Default fallback (used for other filetypes)
 		default = {
 			cmd = "cppman",
 			args = "",
-			has_selection = true,
 		},
 	},
 }
