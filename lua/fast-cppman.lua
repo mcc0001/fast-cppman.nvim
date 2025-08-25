@@ -653,6 +653,7 @@ local function parse_options(word_to_search)
 		-- Check if page exists by trying to execute it with minimal output
 		local cache_key = "exists_" .. word_to_search
 		if state.cache[cache_key] ~= nil then
+			-- Return empty array if exists, -1 if doesn't exist
 			return state.cache[cache_key] and {} or -1
 		end
 
@@ -668,23 +669,23 @@ local function parse_options(word_to_search)
 			end
 		end
 
+		-- Cache the result (true if exists, false if error pattern matched)
 		state.cache[cache_key] = exists
 		return exists and {} or -1
 	else
 		-- Parse options for adapters that support selections
 		local cache_key = "options_" .. word_to_search
 		if state.cache[cache_key] ~= nil then
-			return state.cache[cache_key] and state.cache[cache_key] or -1
+			-- Check if we've cached a "doesn't exist" state
+			if state.cache[cache_key] == false then
+				return -1
+			end
+			return state.cache[cache_key]
 		end
 
 		local result = vim.fn.system(adapter_info.cmd .. " '" .. word_to_search:gsub("'", "'\\''") .. "' 2>&1")
 
-		-- local exit_code = vim.v.shell_error
-
-		-- if exit_code ~= 0 then
-		-- 	return {}
-		-- end
-
+		-- Check for error patterns in output
 		local exists = true
 		for _, pattern in ipairs(adapter_info.error_patterns) do
 			if result and result:find(pattern) then
@@ -694,15 +695,19 @@ local function parse_options(word_to_search)
 		end
 
 		if not exists then
-			state[cache_key] = exists
+			-- Cache the "doesn't exist" state
+			state.cache[cache_key] = false
 			return -1
 		end
 
 		local options = adapter_info.parse_options and adapter_info.parse_options(result) or {}
 
-		-- if #options == 0 and result:find("error") then
-		-- 	return -1
-		-- end
+		-- If no options were found but we didn't hit an error pattern,
+		-- assume the page exists but has no selectable options
+		if #options == 0 then
+			state.cache[cache_key] = {}
+			return {}
+		end
 
 		state.cache[cache_key] = options
 		return options
