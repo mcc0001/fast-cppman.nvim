@@ -556,11 +556,15 @@ local function execute_command_async(adapter_info, selection, selection_number, 
 	handle, pid = uv.spawn("sh", {
 		args = { "-c", cmd },
 		stdio = { nil, stdout, stderr },
-	}, function(code, signal)
-		stdout:read_stop()
-		stderr:read_stop()
-		stdout:close()
-		stderr:close()
+	}, function(code)
+		if stdout then
+			stdout:read_stop()
+			stdout:close()
+		end
+		if stderr then
+			stderr:read_stop()
+			stderr:close()
+		end
 		if handle then
 			handle:close()
 		end
@@ -577,8 +581,12 @@ local function execute_command_async(adapter_info, selection, selection_number, 
 	-- Add to active jobs
 	table.insert(state.async_jobs, { handle = handle, pid = pid })
 
-	uv.read_start(stdout, on_read)
-	uv.read_start(stderr, on_read)
+	if stdout then
+		uv.read_start(stdout, on_read)
+	end
+	if stderr then
+		uv.read_start(stderr, on_read)
+	end
 end
 
 ---@param selection string
@@ -1018,6 +1026,11 @@ local function show_selection_window(word_to_search, options)
 			vim.api.nvim_win_close(win, true)
 			safe_close(buf)
 			local item = pop_from_history(direction_stack)
+			-- Validate history item before proceeding
+			if not item or not item.page then
+				vim.notify("Invalid history item: missing page", vim.log.levels.ERROR)
+				return
+			end
 
 			push_to_history(opposite_stack, state.current_page, state.current_selection_number)
 
