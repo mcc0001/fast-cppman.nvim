@@ -108,6 +108,7 @@ local state = {
 }
 
 -- Utility functions
+---@param bufnr integer?
 local function safe_close(bufnr)
 	if bufnr and vim.api.nvim_buf_is_valid(bufnr) then
 		pcall(vim.api.nvim_buf_delete, bufnr, { force = true })

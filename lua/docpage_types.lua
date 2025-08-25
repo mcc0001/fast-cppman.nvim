@@ -92,6 +92,7 @@
 ---@class DocPageJobInfo
 ---@field handle UvHandle? Libuv process handle
 ---@field pid integer? Process ID
+---@field word_to_search string? Word being searched (for job tracking)
 
 ---@class DocPageAsyncJobQueue
 ---@field selection string Selection to search for
@@ -117,32 +118,10 @@
 ---@field search_docpage fun(word_to_search: string) Search documentation
 
 -- ============================================================================
---  Function Signatures
+--  Function Signatures (Updated to match actual implementation)
 -- ============================================================================
 
 ---@alias AsyncCallback fun(result: string[])
 
----@class DocPageFunctions
----@field safe_close fun(bufnr: integer?) Safely close a buffer
----@field safe_win_close fun(win_id: integer?) Safely close a window
----@field cleanup fun() Clean up resources
----@field clear_navigation fun() Clear navigation history
----@field generate_cache_key fun(selection: string, selection_number: integer?, columns: integer?): string Generate cache key
----@field generate_buffer_name fun(selection: string): string Generate unique buffer name
----@field get_adapter_info fun(): DocPageAdapterInfo Get adapter info for current filetype
----@field calculate_window_size_and_position fun(content_lines: string[], max_width: integer, max_height: integer, min_height: integer): DocPageGeometry Calculate window geometry
----@field calculate_optimal_columns fun(window_width: integer): integer Calculate optimal columns for content
----@field get_win_opts fun(geometry: DocPageGeometry, opts?: table): table Get window options
----@field build_command fun(adapter_info: DocPageAdapterInfo, selection: string, selection_number: integer?, columns: integer): string Build command string
----@field execute_command_sync fun(adapter_info: DocPageAdapterInfo, selection: string, selection_number: integer?, columns: integer): string[] Execute command synchronously
----@field execute_command_async fun(adapter_info: DocPageAdapterInfo, selection: string, selection_number: integer?, columns: integer, callback: AsyncCallback) Execute command asynchronously
----@field execute_command fun(selection: string, selection_number: integer?, columns: integer, callback: AsyncCallback): string[]? Execute command with appropriate method
----@field parse_options fun(word_to_search: string): DocPageOption[]|integer Parse selection options
----@field prefetch_top_options fun(word_to_search: string, options: DocPageOption[], columns: integer, callback: fun(option_num: integer)?) Prefetch top options
----@field push_to_history fun(stack: DocPageHistoryEntry[], page: string, selection_number: integer?) Push to history stack
----@field pop_from_history fun(stack: DocPageHistoryEntry[]): DocPageHistoryEntry? Pop from history stack
----@field create_docpage_buffer fun(selection: string, selection_number: integer?) Create documentation buffer
----@field show_selection_window fun(word_to_search: string, options: DocPageOption[]) Show selection window
----@field create_input_window fun(): DocPageInputWindow Create input window
-
-return {}
+-- Note: These are the actual functions in your code, not a separate class
+-- The DocPageFunctions class was removed as it doesn't match your implementation structure
