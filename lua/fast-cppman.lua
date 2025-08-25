@@ -143,7 +143,7 @@ M.config = {
 				return vim.split(output, "\n", { trimempty = true })
 			end,
 			error_patterns = { "No manual entry for" },
-			exit_code_error = true,
+			exit_code_error = false,
 			fallback_to_lsp = true,
 			supports_selections = false,
 		},
@@ -171,7 +171,7 @@ M.config = {
 				return filtered_lines
 			end,
 			error_patterns = { "nothing appropriate" },
-			exit_code_error = true,
+			exit_code_error = false,
 			fallback_to_lsp = true,
 			supports_selections = true,
 			parse_options = function(output)
@@ -471,9 +471,9 @@ local function execute_command_sync(adapter_info, selection, selection_number, c
 	local exit_code = vim.v.shell_error
 
 	-- -- Check for errors
-	-- if exit_code ~= 0 and adapter_info.exit_code_error then
-	-- 	return { "Error running " .. adapter_info.cmd .. " (exit code: " .. exit_code .. ")", "Command: " .. cmd }
-	-- end
+	if exit_code ~= 0 and adapter_info.exit_code_error then
+		return { "Error running " .. adapter_info.cmd .. " (exit code: " .. exit_code .. ")", "Command: " .. cmd }
+	end
 
 	-- Check for error patterns in output
 	for _, pattern in ipairs(adapter_info.error_patterns) do
@@ -546,12 +546,12 @@ local function execute_command_async(adapter_info, selection, selection_number, 
 			)
 		end
 
-		-- if code ~= 0 and adapter_info.exit_code_error then
-		-- 	vim.schedule(function()
-		-- 		callback({ "Error running " .. adapter_info.cmd .. " (exit code: " .. code .. ")", "Command: " .. cmd })
-		-- 	end)
-		-- 	return
-		-- end
+		if code ~= 0 and adapter_info.exit_code_error then
+			vim.schedule(function()
+				callback({ "Error running " .. adapter_info.cmd .. " (exit code: " .. code .. ")", "Command: " .. cmd })
+			end)
+			return
+		end
 
 		local full_output = table.concat(output, "")
 
