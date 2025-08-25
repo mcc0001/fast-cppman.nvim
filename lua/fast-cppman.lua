@@ -546,12 +546,12 @@ local function execute_command_async(adapter_info, selection, selection_number, 
 			)
 		end
 
-		if code ~= 0 and adapter_info.exit_code_error then
-			vim.schedule(function()
-				callback({ "Error running " .. adapter_info.cmd .. " (exit code: " .. code .. ")", "Command: " .. cmd })
-			end)
-			return
-		end
+		-- if code ~= 0 and adapter_info.exit_code_error then
+		-- 	vim.schedule(function()
+		-- 		callback({ "Error running " .. adapter_info.cmd .. " (exit code: " .. code .. ")", "Command: " .. cmd })
+		-- 	end)
+		-- 	return
+		-- end
 
 		local full_output = table.concat(output, "")
 
@@ -559,7 +559,8 @@ local function execute_command_async(adapter_info, selection, selection_number, 
 		for _, pattern in ipairs(adapter_info.error_patterns) do
 			if full_output:find(pattern) then
 				vim.schedule(function()
-					callback({ "Error: " .. pattern })
+					-- callback({ "Error: " .. pattern })
+					callback({ pattern })
 				end)
 				return
 			end
@@ -672,22 +673,36 @@ local function parse_options(word_to_search)
 	else
 		-- Parse options for adapters that support selections
 		local cache_key = "options_" .. word_to_search
-		if state.cache[cache_key] then
-			return state.cache[cache_key]
+		if state.cache[cache_key] ~= nil then
+			return state.cache[cache_key] and state.cache[cache_key] or -1
 		end
 
 		local result = vim.fn.system(adapter_info.cmd .. " '" .. word_to_search:gsub("'", "'\\''") .. "' 2>&1")
-		local exit_code = vim.v.shell_error
 
-		if exit_code ~= 0 then
-			return {}
+		-- local exit_code = vim.v.shell_error
+
+		-- if exit_code ~= 0 then
+		-- 	return {}
+		-- end
+
+		local exists = true
+		for _, pattern in ipairs(adapter_info.error_patterns) do
+			if result and result:find(pattern) then
+				exists = false
+				break
+			end
+		end
+
+		if not exists then
+			state[cache_key] = exists
+			return -1
 		end
 
 		local options = adapter_info.parse_options and adapter_info.parse_options(result) or {}
 
-		if #options == 0 and result:find("error") then
-			return -1
-		end
+		-- if #options == 0 and result:find("error") then
+		-- 	return -1
+		-- end
 
 		state.cache[cache_key] = options
 		return options
