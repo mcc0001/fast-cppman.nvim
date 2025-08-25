@@ -34,7 +34,6 @@
 
 ---@class DocPageFileTypeAdapterConfig
 ---@field adapter string Adapter name to use
----@field args string Adapter-specific arguments
 
 ---@class DocPageOption
 ---@field num integer Option number

@@ -24,7 +24,7 @@ M.config = {
 	adapters = {
 		man = {
 			cmd = "man",
-			args = "",
+			args = "-S3",
 			env = { MANWIDTH = "COLUMNS" },
 			process_output = function(output)
 				return vim.split(output, "\n", { trimempty = true })
@@ -80,9 +80,9 @@ M.config = {
 
 	-- Filetype-specific adapter configurations
 	filetype_adapters = {
-		c = { adapter = "cppman", args = "" },
-		cpp = { adapter = "cppman", args = "" },
-		default = { adapter = "cppman", args = "" },
+		c = { adapter = "man" },
+		cpp = { adapter = "cppman" },
+		default = { adapter = "cppman" },
 	},
 }
 
@@ -178,7 +178,7 @@ local function get_adapter_info()
 	return {
 		name = adapter_config.adapter,
 		cmd = base_adapter.cmd,
-		args = adapter_config.args or base_adapter.args,
+		args = base_adapter.args,
 		env = base_adapter.env,
 		process_output = base_adapter.process_output,
 		error_patterns = base_adapter.error_patterns,
