@@ -34,6 +34,18 @@ M.config = {
 			fallback_to_lsp = true,
 			supports_selections = false,
 		},
+		manlinux = {
+			cmd = "man",
+			args = "",
+			env = { MANWIDTH = "COLUMNS" },
+			process_output = function(output)
+				return vim.split(output, "\n", { trimempty = true })
+			end,
+			error_patterns = { "No manual entry for" },
+			exit_code_error = false,
+			fallback_to_lsp = true,
+			supports_selections = false,
+		},
 		cppman = {
 			cmd = "cppman",
 			args = "",
@@ -82,6 +94,8 @@ M.config = {
 	filetype_adapters = {
 		c = { adapter = "man" },
 		cpp = { adapter = "cppman" },
+		sh = { adapter = "manlinux" },
+		bash = { adapter = "manlinux" },
 		default = { adapter = "cppman" },
 	},
 }
